@@ -1,0 +1,42 @@
+import fp from 'fastify-plugin';
+import fjwt, { FastifyJWTOptions } from '@fastify/jwt';
+import { FastifyRequest, FastifyReply } from 'fastify';
+import { config } from '../config';
+
+export default fp<FastifyJWTOptions>(async (fastify) => {
+  fastify.register(fjwt, {
+    secret: config.jwt.secret,
+    sign: {
+      expiresIn: config.jwt.expiresIn,
+    },
+  });
+
+  fastify.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      await request.jwtVerify();
+    } catch (err) {
+      reply.code(401).send({ error: 'Unauthorized', message: 'Invalid or expired token' });
+    }
+  });
+});
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+  }
+}
+
+declare module '@fastify/jwt' {
+  interface FastifyJWT {
+    payload: {
+      id: string;
+      email: string;
+      role: string;
+    };
+    user: {
+      id: string;
+      email: string;
+      role: string;
+    };
+  }
+}

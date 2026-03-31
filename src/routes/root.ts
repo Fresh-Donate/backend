@@ -1,9 +1,17 @@
-import { FastifyPluginAsync } from 'fastify'
+import { FastifyPluginAsync } from 'fastify';
 
-const root: FastifyPluginAsync = async (fastify, opts): Promise<void> => {
-  fastify.get('/', async function (request, reply) {
-    return { root: true }
-  })
-}
+const root: FastifyPluginAsync = async (fastify): Promise<void> => {
+  fastify.get('/', async () => {
+    return {
+      name: 'FreshDonate API',
+      version: '1.0.0',
+      status: 'running',
+    };
+  });
 
-export default root
+  fastify.get('/health', async () => {
+    return { status: 'ok', timestamp: new Date().toISOString() };
+  });
+};
+
+export default root;
