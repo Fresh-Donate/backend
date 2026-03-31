@@ -12,6 +12,7 @@ RUN npm ci --omit=dev
 
 # --- Build ---
 FROM base AS build
+ENV NODE_ENV=development
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
