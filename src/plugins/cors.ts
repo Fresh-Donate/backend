@@ -1,10 +1,9 @@
 import fp from 'fastify-plugin';
-import cors, { FastifyCorsOptions } from '@fastify/cors';
-import { config } from '../config';
+import cors from '@fastify/cors';
 
-export default fp<FastifyCorsOptions>(async (fastify) => {
+export default fp(async (fastify) => {
   fastify.register(cors, {
-    origin: config.cors.origin,
+    origin: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
