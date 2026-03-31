@@ -22,6 +22,7 @@
     "@fastify/cors": "^11.2.0",
     "@fastify/jwt": "^10.0.0",
     "@fastify/rate-limit": "^10.3.0",
+    "@fastify/redis": "^7.2.0",
     "@fastify/sensible": "^6.0.0",
     "axios": "^1.14.0",
     "bcrypt": "^6.0.0",
@@ -29,6 +30,7 @@
     "fastify": "^5.0.0",
     "fastify-cli": "^7.4.1",
     "fastify-plugin": "^5.0.0",
+    "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.20.0",
     "pg-hstore": "^2.3.4",
@@ -38,6 +40,7 @@
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
+    "@types/ioredis": "^4.28.10",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.0.8",
     "@types/pg": "^8.20.0",

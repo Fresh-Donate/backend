@@ -24,6 +24,12 @@ export const config = {
     origin: (process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:3002').split(','),
   },
 
+  redis: {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379', 10),
+    password: process.env.REDIS_PASSWORD || 'redis',
+  },
+
   rateLimit: {
     max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     timeWindow: parseInt(process.env.RATE_LIMIT_TIMEWINDOW || '60000', 10),
