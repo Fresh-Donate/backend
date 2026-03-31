@@ -3,6 +3,9 @@ import { config } from './index';
 
 const { host, port, name, user, password } = config.database;
 
+// Import all entity models here (NOT base.model — it's abstract)
+const models: any[] = [];
+
 export const sequelize = new Sequelize({
   dialect: 'postgres',
   host,
@@ -11,7 +14,7 @@ export const sequelize = new Sequelize({
   username: user,
   password,
   logging: process.env.NODE_ENV === 'development' ? console.log : false,
-  models: [__dirname + '/../models/**/*.model.{ts,js}'],
+  models,
   pool: {
     max: 10,
     min: 2,
