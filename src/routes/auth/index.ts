@@ -3,6 +3,13 @@ import { config } from '../../config';
 import { UnauthorizedError } from '../../core';
 import crypto from 'node:crypto';
 
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 const authRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.post<{
     Body: { login: string; password: string };
@@ -20,16 +27,7 @@ const authRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   }, async (request) => {
     const { login, password } = request.body;
 
-    const loginMatch = crypto.timingSafeEqual(
-      Buffer.from(login),
-      Buffer.from(config.admin.login),
-    );
-    const passwordMatch = crypto.timingSafeEqual(
-      Buffer.from(password),
-      Buffer.from(config.admin.password),
-    );
-
-    if (!loginMatch || !passwordMatch) {
+    if (!safeEqual(login, config.admin.login) || !safeEqual(password, config.admin.password)) {
       throw new UnauthorizedError('Invalid login or password');
     }
 
