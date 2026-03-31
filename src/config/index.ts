@@ -15,6 +15,11 @@ export const config = {
     password: process.env.DB_PASSWORD || 'postgres',
   },
 
+  admin: {
+    login: process.env.ADMIN_LOGIN || 'admin',
+    password: process.env.ADMIN_PASSWORD || 'admin',
+  },
+
   jwt: {
     secret: process.env.JWT_SECRET || 'change-me-to-a-random-secret-in-production',
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
