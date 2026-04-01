@@ -8,7 +8,7 @@ import {
   UpdatedAt,
 } from 'sequelize-typescript';
 
-export abstract class BaseModel<T extends object = any> extends Model<T> {
+export abstract class BaseModel<TAttributes extends object = any, TCreation extends object = TAttributes> extends Model<TAttributes, TCreation> {
   @PrimaryKey
   @Default(DataType.UUIDV4)
   @Column(DataType.UUID)

@@ -4,7 +4,9 @@ import { config } from './index';
 const { host, port, name, user, password } = config.database;
 
 // Import all entity models here (NOT base.model — it's abstract)
-const models: any[] = [];
+import { ShopSettings } from '../models/shop-settings.model';
+
+const models: any[] = [ShopSettings];
 
 export const sequelize = new Sequelize({
   dialect: 'postgres',
@@ -32,10 +34,8 @@ export async function initDatabase(): Promise<void> {
     await sequelize.authenticate();
     console.log('Database connection established successfully.');
 
-    if (process.env.NODE_ENV === 'development') {
-      await sequelize.sync({ alter: true });
-      console.log('Database synced (alter mode).');
-    }
+    await sequelize.sync({ alter: true });
+    console.log('Database synced.');
   } catch (error) {
     console.error('Unable to connect to the database:', error);
     throw error;
