@@ -6,9 +6,10 @@ const { host, port, name, user, password } = config.database;
 // Import all entity models here (NOT base.model — it's abstract)
 import { ShopSettings } from '../models/shop-settings.model';
 import { Product } from '../models/product.model';
-import {Settings} from "../models/settings.model";
+import { Settings } from '../models/settings.model';
+import { PaymentProvider } from '../models/payment-provider.model';
 
-const models: any[] = [ShopSettings, Product, Settings];
+const models: any[] = [ShopSettings, Product, Settings, PaymentProvider];
 
 export const sequelize = new Sequelize({
   dialect: 'postgres',
