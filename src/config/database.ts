@@ -8,8 +8,9 @@ import { ShopSettings } from '../models/shop-settings.model';
 import { Product } from '../models/product.model';
 import { Settings } from '../models/settings.model';
 import { PaymentProvider } from '../models/payment-provider.model';
+import { PaymentOption } from '../models/payment-option.model';
 
-const models: any[] = [ShopSettings, Product, Settings, PaymentProvider];
+const models: any[] = [ShopSettings, Product, Settings, PaymentProvider, PaymentOption];
 
 export const sequelize = new Sequelize({
   dialect: 'postgres',
