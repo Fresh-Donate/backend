@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import {SettingsService} from "../../services/settings.service";
+import { SettingsService, SettingsDto } from '../../services/settings.service';
 
 const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new SettingsService();
@@ -11,20 +11,39 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
   // PUT /settings — admin only
   fastify.put<{
-    Body: { demo_payments?: boolean };
+    Body: {
+      demo_payments?: boolean;
+      delivery_method?: string;
+      rcon_config?: { host?: string; port?: number; password?: string };
+      plugin_config?: { token?: string };
+    };
   }>('/', {
     onRequest: [fastify.authenticate],
     schema: {
       body: {
-        type: 'object',
+        type: 'object' as const,
         properties: {
-          demo_payments: { type: 'boolean' }
+          demo_payments: { type: 'boolean' as const },
+          delivery_method: { type: 'string' as const, enum: ['rcon', 'plugin'] },
+          rcon_config: {
+            type: 'object' as const,
+            properties: {
+              host: { type: 'string' as const, maxLength: 256 },
+              port: { type: 'integer' as const, minimum: 1, maximum: 65535 },
+              password: { type: 'string' as const, maxLength: 256 },
+            },
+          },
+          plugin_config: {
+            type: 'object' as const,
+            properties: {
+              token: { type: 'string' as const, maxLength: 64 },
+            },
+          },
         },
       },
     },
   }, async (request) => {
-    const { demo_payments } = request.body;
-    return service.update({ demo_payments });
+    return service.update(request.body as Partial<SettingsDto>);
   });
 };
 
