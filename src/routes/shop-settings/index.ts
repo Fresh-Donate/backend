@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { ShopSettingsService } from '../../services/shop-settings.service';
+import { ShopSettingsService } from '@/services/shop-settings.service';
 
 const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new ShopSettingsService();

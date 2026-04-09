@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
-import { PaymentService } from '../../services/payment.service';
-import type { PaymentStatus } from '../../models/payment.model';
+import { PaymentService } from '@/services/payment.service';
+import type { PaymentStatus } from '@/models/payment.model';
 
 const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentService();
@@ -27,12 +27,8 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       },
     },
   }, async (request, reply) => {
-    try {
-      const payment = await service.create(request.body);
-      return reply.code(201).send(payment);
-    } catch (err: any) {
-      return reply.code(400).send({ error: err.message });
-    }
+    const payment = await service.create(request.body);
+    return reply.code(201).send(payment);
   });
 
   // GET /payments — admin only, list all payments
@@ -67,12 +63,8 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   // POST /payments/:id/confirm — webhook / admin manual confirm
   fastify.post<{ Params: { id: string } }>('/:id/confirm', {
     onRequest: [fastify.authenticate],
-  }, async (request, reply) => {
-    try {
-      return await service.confirmPayment(request.params.id);
-    } catch (err: any) {
-      return reply.code(400).send({ error: err.message });
-    }
+  }, async (request) => {
+    return service.confirmPayment(request.params.id);
   });
 };
 

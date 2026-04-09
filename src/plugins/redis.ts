@@ -1,6 +1,6 @@
 import fp from 'fastify-plugin';
 import fastifyRedis, { FastifyRedisPluginOptions } from '@fastify/redis';
-import { config } from '../config';
+import { config } from '@/config';
 
 export default fp<FastifyRedisPluginOptions>(async (fastify) => {
   fastify.register(fastifyRedis, {

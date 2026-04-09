@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { join } from 'node:path';
 import AutoLoad, { AutoloadPluginOptions } from '@fastify/autoload';
 import { FastifyPluginAsync, FastifyServerOptions } from 'fastify';
-import { initDatabase } from './config/database';
+import { initDatabase } from '@/config/database';
 
 export interface AppOptions extends FastifyServerOptions, Partial<AutoloadPluginOptions> {}
 

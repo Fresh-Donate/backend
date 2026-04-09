@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { PaymentProviderService, UpdatePaymentProviderDto } from '../../services/payment-provider.service';
+import { PaymentProviderService, UpdatePaymentProviderDto } from '@/services/payment-provider.service';
 
 const paymentProviderRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentProviderService();
@@ -39,12 +39,8 @@ const paymentProviderRoutes: FastifyPluginAsync = async (fastify): Promise<void>
         },
       },
     },
-  }, async (request, reply) => {
-    try {
-      return await service.update(request.params.providerId, request.body);
-    } catch (err: any) {
-      return reply.code(404).send({ error: err.message });
-    }
+  }, async (request) => {
+    return service.update(request.params.providerId, request.body);
   });
 };
 

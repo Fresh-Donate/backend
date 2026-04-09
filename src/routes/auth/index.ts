@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
-import { config } from '../../config';
-import { UnauthorizedError } from '../../core';
+import { config } from '@/config';
+import { UnauthorizedError } from '@/core';
 import crypto from 'node:crypto';
 
 function safeEqual(a: string, b: string): boolean {

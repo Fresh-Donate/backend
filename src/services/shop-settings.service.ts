@@ -1,4 +1,4 @@
-import { ShopSettings } from '../models/shop-settings.model';
+import { ShopSettings } from '@/models/shop-settings.model';
 
 export interface ShopSettingsDto {
   name: string;

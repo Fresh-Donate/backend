@@ -1,7 +1,7 @@
 import fp from 'fastify-plugin';
 import { FastifyError } from 'fastify';
-import { AppError } from '../core/errors';
-import { EntityNotFoundError } from '../core/base.service';
+import { AppError } from '@/core/errors';
+import { EntityNotFoundError } from '@/core/base.service';
 
 export default fp(async (fastify) => {
   fastify.setErrorHandler((error: FastifyError | AppError | EntityNotFoundError, request, reply) => {

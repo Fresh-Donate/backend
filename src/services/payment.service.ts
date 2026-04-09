@@ -1,8 +1,9 @@
-import { Payment, PaymentStatus } from '../models/payment.model';
-import { Customer } from '../models/customer.model';
-import { Product } from '../models/product.model';
+import { Payment, PaymentStatus } from '@/models/payment.model';
+import { Customer } from '@/models/customer.model';
+import { Product } from '@/models/product.model';
 import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
+import { NotFoundError, ValidationError } from '@/core';
 import { Op } from 'sequelize';
 
 export interface PaymentDto {
@@ -76,7 +77,7 @@ export class PaymentService {
     // 1. Validate product
     const product = await Product.findByPk(data.productId);
     if (!product) {
-      throw new Error('Product not found');
+      throw new NotFoundError('Product not found');
     }
 
     // 2. Find or create customer
@@ -167,8 +168,8 @@ export class PaymentService {
     const payment = await Payment.findByPk(paymentId, {
       include: [{ model: Customer, required: false }],
     });
-    if (!payment) throw new Error('Payment not found');
-    if (payment.status !== 'pending') throw new Error('Payment is not pending');
+    if (!payment) throw new NotFoundError('Payment not found');
+    if (payment.status !== 'pending') throw new ValidationError('Payment is not pending');
 
     const now = new Date();
     await payment.update({

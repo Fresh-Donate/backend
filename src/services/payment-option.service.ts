@@ -1,4 +1,5 @@
-import { PaymentOption } from '../models/payment-option.model';
+import { PaymentOption } from '@/models/payment-option.model';
+import { NotFoundError } from '@/core';
 
 export interface PaymentOptionDto {
   id: string;
@@ -52,7 +53,7 @@ export class PaymentOptionService {
 
   async findById(id: string): Promise<PaymentOptionDto> {
     const option = await PaymentOption.findByPk(id);
-    if (!option) throw new Error('Payment option not found');
+    if (!option) throw new NotFoundError('Payment option not found');
     return toDto(option);
   }
 
@@ -67,14 +68,14 @@ export class PaymentOptionService {
 
   async update(id: string, data: UpdatePaymentOptionDto): Promise<PaymentOptionDto> {
     const option = await PaymentOption.findByPk(id);
-    if (!option) throw new Error('Payment option not found');
+    if (!option) throw new NotFoundError('Payment option not found');
     await option.update(data);
     return toDto(option);
   }
 
   async delete(id: string): Promise<void> {
     const option = await PaymentOption.findByPk(id);
-    if (!option) throw new Error('Payment option not found');
+    if (!option) throw new NotFoundError('Payment option not found');
     await option.destroy();
   }
 }

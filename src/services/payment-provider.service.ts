@@ -1,4 +1,5 @@
-import { PaymentProvider, PaymentMethodData, CommissionRuleData } from '../models/payment-provider.model';
+import { PaymentProvider, PaymentMethodData, CommissionRuleData } from '@/models/payment-provider.model';
+import { NotFoundError } from '@/core';
 
 export interface PaymentProviderDto {
   id: string;
@@ -115,7 +116,7 @@ export class PaymentProviderService {
     await this.seed();
     const provider = await PaymentProvider.findOne({ where: { providerId } });
     if (!provider) {
-      throw new Error(`Payment provider "${providerId}" not found`);
+      throw new NotFoundError(`Payment provider "${providerId}" not found`);
     }
 
     await provider.update(data);

@@ -1,7 +1,7 @@
 import fp from 'fastify-plugin';
 import fjwt, { FastifyJWTOptions } from '@fastify/jwt';
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { config } from '../config';
+import { config } from '@/config';
 
 export default fp<FastifyJWTOptions>(async (fastify) => {
   await fastify.register(fjwt, {

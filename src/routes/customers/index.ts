@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
-import { CustomerService } from '../../services/customer.service';
-import { PaymentService } from '../../services/payment.service';
+import { CustomerService } from '@/services/customer.service';
+import { PaymentService } from '@/services/payment.service';
 
 const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const customerService = new CustomerService();

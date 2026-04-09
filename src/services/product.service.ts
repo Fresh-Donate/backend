@@ -1,5 +1,5 @@
-import { Product } from '../models/product.model';
-import { NotFoundError } from '../core';
+import { Product } from '@/models/product.model';
+import { NotFoundError } from '@/core';
 
 export interface ProductDto {
   id: string;

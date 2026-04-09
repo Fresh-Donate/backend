@@ -4,13 +4,13 @@ import { config } from './index';
 const { host, port, name, user, password } = config.database;
 
 // Import all entity models here (NOT base.model — it's abstract)
-import { ShopSettings } from '../models/shop-settings.model';
-import { Product } from '../models/product.model';
-import { Settings } from '../models/settings.model';
-import { PaymentProvider } from '../models/payment-provider.model';
-import { PaymentOption } from '../models/payment-option.model';
-import { Customer } from '../models/customer.model';
-import { Payment } from '../models/payment.model';
+import { ShopSettings } from '@/models/shop-settings.model';
+import { Product } from '@/models/product.model';
+import { Settings } from '@/models/settings.model';
+import { PaymentProvider } from '@/models/payment-provider.model';
+import { PaymentOption } from '@/models/payment-option.model';
+import { Customer } from '@/models/customer.model';
+import { Payment } from '@/models/payment.model';
 
 const models: any[] = [ShopSettings, Product, Settings, PaymentProvider, PaymentOption, Customer, Payment];
 

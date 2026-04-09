@@ -1,4 +1,4 @@
-import { Customer } from '../models/customer.model';
+import { Customer } from '@/models/customer.model';
 import { Op } from 'sequelize';
 
 export interface CustomerDto {

@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { ProductService } from '../../services/product.service';
+import { ProductService } from '@/services/product.service';
 
 const productBodySchema = {
   type: 'object' as const,
