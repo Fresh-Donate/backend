@@ -3,6 +3,7 @@ import { Customer } from '@/models/customer.model';
 import { Product } from '@/models/product.model';
 import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
+import { RconService } from './rcon.service';
 import { NotFoundError, ValidationError } from '@/core';
 import { Op } from 'sequelize';
 
@@ -72,6 +73,7 @@ function getCacheKey(customerId: string, productId: string): string {
 export class PaymentService {
   private customerService = new CustomerService();
   private settingsService = new SettingsService();
+  private rconService = new RconService();
 
   async create(data: CreatePaymentDto): Promise<PaymentDto> {
     // 1. Validate product
@@ -127,12 +129,8 @@ export class PaymentService {
       // Update customer stats
       await this.customerService.incrementStats(customer.id, totalAmount);
 
-      // TODO: Execute RCON commands to deliver items to the player
-      // const commands = product.commands || [];
-      // for (const cmd of commands) {
-      //   const resolved = cmd.replace('{player}', data.nickname).replace('{amount}', String(product.quantity));
-      //   await rconClient.send(resolved);
-      // }
+      // Deliver via RCON
+      await this.deliver(product, data.nickname, payment);
 
       const result = await Payment.findByPk(payment.id, {
         include: [{ model: Customer, required: false }],
@@ -181,15 +179,11 @@ export class PaymentService {
     // Update customer stats
     await this.customerService.incrementStats(payment.customerId, Number(payment.totalAmount));
 
-    // TODO: Execute RCON commands
-    // const product = await Product.findByPk(payment.productId);
-    // const commands = product?.commands || [];
-    // for (const cmd of commands) {
-    //   const resolved = cmd
-    //     .replace('{player}', payment.customer?.nickname || '')
-    //     .replace('{amount}', String(payment.quantity));
-    //   await rconClient.send(resolved);
-    // }
+    // Deliver via RCON
+    const product = await Product.findByPk(payment.productId);
+    if (product) {
+      await this.deliver(product, payment.customer?.nickname || '', payment);
+    }
 
     // Clear cache
     const cacheKey = getCacheKey(payment.customerId, payment.productId);
@@ -242,6 +236,32 @@ export class PaymentService {
       order: [['created_at', 'DESC']],
     });
     return payments.map(toDto);
+  }
+
+  private async deliver(product: Product, nickname: string, payment: Payment): Promise<void> {
+    const commands = product.commands || [];
+    if (commands.length === 0) return;
+
+    try {
+      const results = await this.rconService.executeCommands(commands, {
+        player: nickname,
+        amount: String(product.quantity),
+        product: product.name,
+      });
+
+      await payment.update({
+        meta: { ...payment.meta, rcon: results },
+      });
+    } catch (err) {
+      // RCON failed — mark as paid (not delivered) so admin can retry
+      await payment.update({
+        status: 'paid',
+        meta: {
+          ...payment.meta,
+          rconError: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
   }
 
   /** Stats for dashboard */
