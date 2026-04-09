@@ -40,8 +40,12 @@ export async function initDatabase(): Promise<void> {
     await sequelize.authenticate();
     console.log('Database connection established successfully.');
 
-    await sequelize.sync({ alter: true });
-    console.log('Database synced.');
+    // sync в фоне — не блокирует старт сервера
+    sequelize.sync({ alter: true }).then(() => {
+      console.log('Database synced.');
+    }).catch((err) => {
+      console.error('Database sync failed:', err);
+    });
   } catch (error) {
     console.error('Unable to connect to the database:', error);
     throw error;

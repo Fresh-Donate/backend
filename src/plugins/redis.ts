@@ -6,6 +6,6 @@ export default fp<FastifyRedisPluginOptions>(async (fastify) => {
   fastify.register(fastifyRedis, {
     host: config.redis.host,
     port: config.redis.port,
-    password: config.redis.password,
+    password: config.redis.password || undefined,
   });
 });

@@ -13,13 +13,13 @@ const app: FastifyPluginAsync<AppOptions> = async (fastify, opts): Promise<void>
   await initDatabase();
 
   // Load all plugins (cors, jwt, rate-limit, error-handler, sensible)
-  void fastify.register(AutoLoad, {
+  await fastify.register(AutoLoad, {
     dir: join(__dirname, 'plugins'),
     options: opts,
   });
 
   // Load all routes
-  void fastify.register(AutoLoad, {
+  await fastify.register(AutoLoad, {
     dir: join(__dirname, 'routes'),
     options: opts,
     routeParams: true,

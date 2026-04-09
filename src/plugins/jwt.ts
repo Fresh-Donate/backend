@@ -4,7 +4,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { config } from '../config';
 
 export default fp<FastifyJWTOptions>(async (fastify) => {
-  fastify.register(fjwt, {
+  await fastify.register(fjwt, {
     secret: config.jwt.secret,
     sign: {
       expiresIn: config.jwt.expiresIn,
