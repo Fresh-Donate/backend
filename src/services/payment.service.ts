@@ -3,7 +3,7 @@ import { Customer } from '@/models/customer.model';
 import { Product } from '@/models/product.model';
 import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
-import { RconService } from './rcon.service';
+import { DeliveryService } from './delivery.service';
 import { NotFoundError, ValidationError } from '@/core';
 import { Op } from 'sequelize';
 
@@ -73,7 +73,7 @@ function getCacheKey(customerId: string, productId: string): string {
 export class PaymentService {
   private customerService = new CustomerService();
   private settingsService = new SettingsService();
-  private rconService = new RconService();
+  private deliveryService = new DeliveryService();
 
   async create(data: CreatePaymentDto): Promise<PaymentDto> {
     // 1. Validate product
@@ -117,20 +117,18 @@ export class PaymentService {
     // 6. Check if demo mode
     const settings = await this.settingsService.get();
     if (settings.demo_payments) {
-      // Demo: instantly mark as paid and delivered
-      const now = new Date();
+      // Demo: instantly mark as paid
       await payment.update({
-        status: 'delivered',
-        paidAt: now,
-        deliveredAt: now,
+        status: 'paid',
+        paidAt: new Date(),
         meta: { demo: true },
       });
 
       // Update customer stats
       await this.customerService.incrementStats(customer.id, totalAmount);
 
-      // Deliver via RCON
-      await this.deliver(product, data.nickname, payment);
+      // Attempt delivery (RCON with retries)
+      await this.deliveryService.attemptDelivery(payment.id);
 
       const result = await Payment.findByPk(payment.id, {
         include: [{ model: Customer, required: false }],
@@ -169,21 +167,19 @@ export class PaymentService {
     if (!payment) throw new NotFoundError('Payment not found');
     if (payment.status !== 'pending') throw new ValidationError('Payment is not pending');
 
-    const now = new Date();
     await payment.update({
-      status: 'delivered',
-      paidAt: now,
-      deliveredAt: now,
+      status: 'paid',
+      paidAt: new Date(),
     });
 
     // Update customer stats
     await this.customerService.incrementStats(payment.customerId, Number(payment.totalAmount));
 
-    // Deliver via RCON
-    const product = await Product.findByPk(payment.productId);
-    if (product) {
-      await this.deliver(product, payment.customer?.nickname || '', payment);
-    }
+    // Attempt delivery (RCON with retries)
+    await this.deliveryService.attemptDelivery(payment.id);
+
+    // Reload to get updated status
+    await payment.reload();
 
     // Clear cache
     const cacheKey = getCacheKey(payment.customerId, payment.productId);
@@ -236,32 +232,6 @@ export class PaymentService {
       order: [['created_at', 'DESC']],
     });
     return payments.map(toDto);
-  }
-
-  private async deliver(product: Product, nickname: string, payment: Payment): Promise<void> {
-    const commands = product.commands || [];
-    if (commands.length === 0) return;
-
-    try {
-      const results = await this.rconService.executeCommands(commands, {
-        player: nickname,
-        amount: String(product.quantity),
-        product: product.name,
-      });
-
-      await payment.update({
-        meta: { ...payment.meta, rcon: results },
-      });
-    } catch (err) {
-      // RCON failed — mark as paid (not delivered) so admin can retry
-      await payment.update({
-        status: 'paid',
-        meta: {
-          ...payment.meta,
-          rconError: err instanceof Error ? err.message : String(err),
-        },
-      });
-    }
   }
 
   /** Stats for dashboard */

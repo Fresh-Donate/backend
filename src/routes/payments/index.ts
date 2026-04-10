@@ -1,9 +1,11 @@
 import { FastifyPluginAsync } from 'fastify';
 import { PaymentService } from '@/services/payment.service';
+import { DeliveryService } from '@/services/delivery.service';
 import type { PaymentStatus } from '@/models/payment.model';
 
 const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentService();
+  const deliveryService = new DeliveryService();
 
   // POST /payments — public (shop creates payment)
   fastify.post<{
@@ -65,6 +67,16 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     onRequest: [fastify.authenticate],
   }, async (request) => {
     return service.confirmPayment(request.params.id);
+  });
+
+  // POST /payments/:id/retry-delivery — admin manual retry delivery
+  fastify.post<{ Params: { id: string } }>('/:id/retry-delivery', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    await deliveryService.retryDelivery(request.params.id);
+    const payment = await service.findById(request.params.id);
+    if (!payment) return reply.code(404).send({ error: 'Payment not found' });
+    return payment;
   });
 };
 

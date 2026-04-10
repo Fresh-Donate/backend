@@ -7,8 +7,23 @@ export interface RconResult {
   success: boolean;
 }
 
+export interface DeliveryLog {
+  attempt: number;
+  timestamp: string;
+  success: boolean;
+  results?: RconResult[];
+  error?: string;
+}
+
 export class RconService {
   private settingsService = new SettingsService();
+
+  async isConfigured(): Promise<boolean> {
+    const settings = await this.settingsService.get();
+    if (settings.delivery_method !== 'rcon') return false;
+    const { host, password } = settings.rcon_config;
+    return !!(host && password);
+  }
 
   async executeCommands(
     commands: string[],
@@ -17,7 +32,7 @@ export class RconService {
     const settings = await this.settingsService.get();
 
     if (settings.delivery_method !== 'rcon') {
-      return [];
+      throw new Error('Delivery method is not RCON');
     }
 
     const { host, port, password } = settings.rcon_config;
