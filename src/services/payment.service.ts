@@ -5,7 +5,7 @@ import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
 import { DeliveryService } from './delivery.service';
 import { NotFoundError, ValidationError } from '@/core';
-import { Op } from 'sequelize';
+import { Op, fn, col, literal } from 'sequelize';
 
 export interface PaymentDto {
   id: string;
@@ -258,5 +258,44 @@ export class PaymentService {
       totalCustomers,
       recentPayments: recentRows.map(toDto),
     };
+  }
+
+  /** Revenue chart data grouped by period */
+  async getRevenueChart(options: {
+    from: string;
+    to: string;
+    period: 'daily' | 'weekly' | 'monthly';
+  }): Promise<{ date: string; amount: number; count: number }[]> {
+    const { from, to, period } = options;
+
+    const truncFn = period === 'monthly'
+      ? "date_trunc('month', paid_at)"
+      : period === 'weekly'
+        ? "date_trunc('week', paid_at)"
+        : "date_trunc('day', paid_at)";
+
+    const results = await Payment.findAll({
+      attributes: [
+        [literal(truncFn), 'date'],
+        [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'amount'],
+        [fn('COUNT', col('id')), 'count'],
+      ],
+      where: {
+        status: { [Op.in]: ['paid', 'delivered'] },
+        paidAt: {
+          [Op.gte]: new Date(from),
+          [Op.lte]: new Date(to),
+        },
+      },
+      group: [literal(truncFn)] as any,
+      order: [[literal(truncFn), 'ASC']] as any,
+      raw: true,
+    }) as unknown as { date: string; amount: string; count: string }[];
+
+    return results.map((r) => ({
+      date: r.date,
+      amount: Number(r.amount) || 0,
+      count: Number(r.count) || 0,
+    }));
   }
 }
