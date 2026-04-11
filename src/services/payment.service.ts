@@ -1,6 +1,8 @@
 import { Payment, PaymentStatus } from '@/models/payment.model';
 import { Customer } from '@/models/customer.model';
 import { Product } from '@/models/product.model';
+import { PaymentOption } from '@/models/payment-option.model';
+import { PaymentProvider } from '@/models/payment-provider.model';
 import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
 import { DeliveryService } from './delivery.service';
@@ -15,9 +17,13 @@ export interface PaymentDto {
   productId: string;
   productName: string;
   productPrice: number;
+  productCurrency: string;
   currency: string;
   quantity: number;
   totalAmount: number;
+  commissionPercent: number;
+  commissionAmount: number;
+  providerAmount: number;
   status: PaymentStatus;
   paymentOptionId: string | null;
   providerId: string | null;
@@ -46,9 +52,13 @@ function toDto(p: Payment): PaymentDto {
     productId: p.productId,
     productName: p.productName,
     productPrice: Number(p.productPrice),
+    productCurrency: p.productCurrency || p.currency,
     currency: p.currency,
     quantity: p.quantity,
     totalAmount: Number(p.totalAmount),
+    commissionPercent: Number(p.commissionPercent),
+    commissionAmount: Number(p.commissionAmount),
+    providerAmount: Number(p.providerAmount),
     status: p.status,
     paymentOptionId: p.paymentOptionId,
     providerId: p.providerId,
@@ -98,18 +108,63 @@ export class PaymentService {
       paymentCache.delete(cacheKey);
     }
 
-    // 4. Calculate total (for now 1:1, commission logic can be added later)
-    const totalAmount = Number(product.price);
+    // 4. Determine payment currency and commission from provider settings
+    const productPrice = Number(product.price);
+    const productCurrency = product.currency;
+    let paymentCurrency = productCurrency; // fallback to product currency
+    let commissionPercent = 0;
+    let commissionAmount = 0;
+    let totalAmount = productPrice;
+    let providerAmount = productPrice;
+
+    const option = await PaymentOption.findByPk(data.paymentOptionId);
+    if (option) {
+      const provider = await PaymentProvider.findOne({ where: { providerId: option.providerId } });
+      if (provider) {
+        // Determine actual payment currency from provider
+        // If provider supports product currency — use it; otherwise use first supported
+        if (provider.supportedCurrencies.length > 0) {
+          paymentCurrency = provider.supportedCurrencies.includes(productCurrency)
+            ? productCurrency
+            : provider.supportedCurrencies[0];
+        }
+
+        // Find method commission from provider's methods array
+        const method = provider.methods.find((m) => m.id === option.methodId);
+        commissionPercent = method?.commission ?? 0;
+        commissionAmount = Math.round(productPrice * commissionPercent) / 100;
+
+        const rule = provider.commissionRule;
+        if (rule.mode === 'buyer') {
+          // Buyer pays commission on top
+          totalAmount = productPrice + commissionAmount;
+          providerAmount = productPrice;
+        } else if (rule.mode === 'split') {
+          // Split: buyer pays half, seller absorbs half
+          const buyerShare = Math.round(commissionAmount * 50) / 100;
+          totalAmount = productPrice + buyerShare;
+          providerAmount = productPrice - (commissionAmount - buyerShare);
+        } else {
+          // Seller mode (default): commission deducted from seller's revenue
+          totalAmount = productPrice;
+          providerAmount = productPrice - commissionAmount;
+        }
+      }
+    }
 
     // 5. Create payment record
     const payment = await Payment.create({
       customerId: customer.id,
       productId: product.id,
       productName: product.name,
-      productPrice: Number(product.price),
-      currency: product.currency,
+      productPrice,
+      productCurrency,
+      currency: paymentCurrency,
       quantity: product.quantity,
       totalAmount,
+      commissionPercent,
+      commissionAmount,
+      providerAmount,
       paymentOptionId: data.paymentOptionId,
       status: 'pending',
     });
@@ -236,14 +291,26 @@ export class PaymentService {
 
   /** Stats for dashboard */
   async getStats(): Promise<{
-    totalRevenue: number;
+    revenueByCurrency: { currency: string; total: number; commission: number; provider: number }[];
     totalPayments: number;
     totalCustomers: number;
     recentPayments: PaymentDto[];
   }> {
-    const [revenueResult, totalPayments, totalCustomers, recentRows] = await Promise.all([
-      Payment.sum('totalAmount', { where: { status: { [Op.in]: ['paid', 'delivered'] } } }),
-      Payment.count({ where: { status: { [Op.in]: ['paid', 'delivered'] } } }),
+    const paidWhere = { status: { [Op.in]: ['paid', 'delivered'] } };
+
+    const [revenueByCurrency, totalPayments, totalCustomers, recentRows] = await Promise.all([
+      Payment.findAll({
+        attributes: [
+          'currency',
+          [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'total'],
+          [fn('COALESCE', fn('SUM', col('commission_amount')), 0), 'commission'],
+          [fn('COALESCE', fn('SUM', col('provider_amount')), 0), 'provider'],
+        ],
+        where: paidWhere,
+        group: ['currency'],
+        raw: true,
+      }) as unknown as { currency: string; total: string; commission: string; provider: string }[],
+      Payment.count({ where: paidWhere }),
       Customer.count(),
       Payment.findAll({
         include: [{ model: Customer, required: false }],
@@ -253,20 +320,26 @@ export class PaymentService {
     ]);
 
     return {
-      totalRevenue: Number(revenueResult) || 0,
+      revenueByCurrency: revenueByCurrency.map((r) => ({
+        currency: r.currency,
+        total: Number(r.total) || 0,
+        commission: Number(r.commission) || 0,
+        provider: Number(r.provider) || 0,
+      })),
       totalPayments,
       totalCustomers,
       recentPayments: recentRows.map(toDto),
     };
   }
 
-  /** Revenue chart data grouped by period */
+  /** Revenue chart data grouped by period, optionally filtered by currency */
   async getRevenueChart(options: {
     from: string;
     to: string;
     period: 'daily' | 'weekly' | 'monthly';
+    currency?: string;
   }): Promise<{ date: string; amount: number; count: number }[]> {
-    const { from, to, period } = options;
+    const { from, to, period, currency } = options;
 
     const truncFn = period === 'monthly'
       ? "date_trunc('month', paid_at)"
@@ -274,19 +347,24 @@ export class PaymentService {
         ? "date_trunc('week', paid_at)"
         : "date_trunc('day', paid_at)";
 
+    const where: any = {
+      status: { [Op.in]: ['paid', 'delivered'] },
+      paidAt: {
+        [Op.gte]: new Date(from),
+        [Op.lte]: new Date(to),
+      },
+    };
+    if (currency) {
+      where.currency = currency;
+    }
+
     const results = await Payment.findAll({
       attributes: [
         [literal(truncFn), 'date'],
         [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'amount'],
         [fn('COUNT', col('id')), 'count'],
       ],
-      where: {
-        status: { [Op.in]: ['paid', 'delivered'] },
-        paidAt: {
-          [Op.gte]: new Date(from),
-          [Op.lte]: new Date(to),
-        },
-      },
+      where,
       group: [literal(truncFn)] as any,
       order: [[literal(truncFn), 'ASC']] as any,
       raw: true,

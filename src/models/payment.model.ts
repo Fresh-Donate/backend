@@ -18,9 +18,13 @@ interface PaymentAttributes {
   productId: string;
   productName: string;
   productPrice: number;
+  productCurrency: string;
   currency: string;
   quantity: number;
   totalAmount: number;
+  commissionPercent: number;
+  commissionAmount: number;
+  providerAmount: number;
   status: PaymentStatus;
   paymentOptionId: string | null;
   providerId: string | null;
@@ -37,6 +41,10 @@ type PaymentCreationAttributes = Optional<
   PaymentAttributes,
   | 'id'
   | 'status'
+  | 'productCurrency'
+  | 'commissionPercent'
+  | 'commissionAmount'
+  | 'providerAmount'
   | 'paymentOptionId'
   | 'providerId'
   | 'externalPaymentId'
@@ -66,6 +74,10 @@ export class Payment extends BaseModel<PaymentAttributes, PaymentCreationAttribu
   @Column(DataType.DECIMAL(12, 2))
   declare productPrice: number;
 
+  @Default('')
+  @Column(DataType.STRING(8))
+  declare productCurrency: string;
+
   @Column(DataType.STRING(8))
   declare currency: string;
 
@@ -74,6 +86,18 @@ export class Payment extends BaseModel<PaymentAttributes, PaymentCreationAttribu
 
   @Column(DataType.DECIMAL(12, 2))
   declare totalAmount: number;
+
+  @Default(0)
+  @Column(DataType.DECIMAL(5, 2))
+  declare commissionPercent: number;
+
+  @Default(0)
+  @Column(DataType.DECIMAL(12, 2))
+  declare commissionAmount: number;
+
+  @Default(0)
+  @Column(DataType.DECIMAL(12, 2))
+  declare providerAmount: number;
 
   @Default('pending')
   @Column(DataType.STRING(16))

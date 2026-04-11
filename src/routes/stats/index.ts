@@ -13,15 +13,16 @@ const statsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
   // GET /stats/chart — admin only, revenue chart data
   fastify.get<{
-    Querystring: { from: string; to: string; period?: string };
+    Querystring: { from: string; to: string; period?: string; currency?: string };
   }>('/chart', {
     onRequest: [fastify.authenticate],
   }, async (request) => {
-    const { from, to, period } = request.query;
+    const { from, to, period, currency } = request.query;
     return paymentService.getRevenueChart({
       from,
       to,
       period: (period as 'daily' | 'weekly' | 'monthly') || 'daily',
+      currency,
     });
   });
 };
