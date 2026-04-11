@@ -33,12 +33,14 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     },
   }, async (request, reply) => {
     // Validate source IP (YooKassa sends from specific IP ranges)
-    const clientIp = request.ip
-      || (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
-      || '';
+    // x-forwarded-for takes priority when behind a reverse proxy (Docker, nginx, etc.)
+    const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
+    const clientIp = forwardedFor || request.ip || '';
 
-    const isDev = process.env.NODE_ENV === 'development';
-    if (!isDev && !YooKassaGateway.isValidWebhookIp(clientIp)) {
+    const skipIpCheck = process.env.NODE_ENV === 'development'
+      || process.env.YOOKASSA_SKIP_IP_CHECK === 'true';
+
+    if (!skipIpCheck && !YooKassaGateway.isValidWebhookIp(clientIp)) {
       request.log.warn(`YooKassa webhook rejected: invalid source IP ${clientIp}`);
       return reply.code(403).send({ error: 'Forbidden' });
     }
