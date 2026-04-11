@@ -33,6 +33,19 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return reply.code(201).send(payment);
   });
 
+  // GET /payments/:id/status — public, check payment status (for return page polling)
+  fastify.get<{ Params: { id: string } }>('/:id/status', async (request, reply) => {
+    const payment = await service.findById(request.params.id);
+    if (!payment) return reply.code(404).send({ error: 'Payment not found' });
+    return {
+      id: payment.id,
+      status: payment.status,
+      productName: payment.productName,
+      totalAmount: payment.totalAmount,
+      currency: payment.currency,
+    };
+  });
+
   // GET /payments — admin only, list all payments
   fastify.get<{
     Querystring: {

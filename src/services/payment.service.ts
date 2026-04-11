@@ -6,8 +6,10 @@ import { PaymentProvider } from '@/models/payment-provider.model';
 import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
 import { DeliveryService } from './delivery.service';
-import { NotFoundError, ValidationError } from '@/core';
+import { NotFoundError, ValidationError, PaymentError } from '@/core';
 import { Op, fn, col, literal } from 'sequelize';
+import { YooKassaGateway } from '@/gateways/yookassa.gateway';
+import { config } from '@/config';
 
 export interface PaymentDto {
   id: string;
@@ -197,14 +199,13 @@ export class PaymentService {
       expiresAt: Date.now() + CACHE_TTL,
     });
 
-    // TODO: Create external payment via provider SDK (YooKassa / Heleket)
-    // const provider = await PaymentProvider.findOne({ where: { providerId: ... } });
-    // const externalPayment = await providerSDK.createPayment({ amount: totalAmount, ... });
-    // await payment.update({
-    //   providerId: provider.providerId,
-    //   externalPaymentId: externalPayment.id,
-    //   externalPaymentUrl: externalPayment.confirmationUrl,
-    // });
+    // 8. Create external payment via provider gateway
+    if (option) {
+      const provider = await PaymentProvider.findOne({ where: { providerId: option.providerId } });
+      if (provider && provider.enabled) {
+        await this.createExternalPayment(payment, provider, option.methodId, product.name);
+      }
+    }
 
     const result = await Payment.findByPk(payment.id, {
       include: [{ model: Customer, required: false }],
@@ -213,7 +214,129 @@ export class PaymentService {
   }
 
   /**
-   * Called by webhook when payment is confirmed by provider
+   * Map YooKassa method IDs to API payment_method_data types
+   */
+  private static readonly YOOKASSA_METHOD_MAP: Record<string, string> = {
+    bank_card: 'bank_card',
+    sbp: 'sbp',
+    yoo_money: 'yoo_money',
+    sber_pay: 'sberbank',
+    t_pay: 'tinkoff_bank',
+    qiwi: 'qiwi',
+  };
+
+  /**
+   * Create external payment via provider gateway (YooKassa, etc.)
+   */
+  private async createExternalPayment(
+    payment: Payment,
+    provider: InstanceType<typeof PaymentProvider>,
+    methodId: string,
+    productName: string,
+  ): Promise<void> {
+    if (provider.providerId === 'yookassa') {
+      const { shopId, secretKey } = provider.credentials;
+      if (!shopId || !secretKey) {
+        throw new PaymentError(
+          'YooKassa credentials not configured. Set shopId and secretKey in payment provider settings.',
+          'YOOKASSA_NOT_CONFIGURED',
+        );
+      }
+
+      const gateway = new YooKassaGateway(shopId, secretKey);
+      const returnUrl = config.payment.returnUrl;
+
+      const yooPayment = await gateway.createPayment({
+        amount: Number(payment.totalAmount),
+        currency: payment.currency,
+        description: `${productName} — FreshDonate`,
+        returnUrl: `${returnUrl}?paymentId=${payment.id}`,
+        paymentMethodType: PaymentService.YOOKASSA_METHOD_MAP[methodId],
+        metadata: {
+          payment_id: payment.id,
+          customer_id: payment.customerId,
+          product_id: payment.productId,
+        },
+      });
+
+      await payment.update({
+        providerId: provider.providerId,
+        externalPaymentId: yooPayment.id,
+        externalPaymentUrl: yooPayment.confirmation?.confirmation_url || null,
+      });
+    }
+    // Future: else if (provider.providerId === 'heleket') { ... }
+  }
+
+  /**
+   * Handle YooKassa webhook notification
+   */
+  async handleYooKassaWebhook(event: string, object: any): Promise<void> {
+    const externalId = object?.id;
+    if (!externalId) return;
+
+    const payment = await Payment.findOne({
+      where: { externalPaymentId: externalId },
+      include: [{ model: Customer, required: false }],
+    });
+    if (!payment) {
+      console.warn(`YooKassa webhook: payment not found for external ID ${externalId}`);
+      return;
+    }
+
+    if (event === 'payment.succeeded' && payment.status === 'pending') {
+      // Payment succeeded — update actual amounts from YooKassa response
+      const incomeAmount = object.income_amount
+        ? Number(object.income_amount.value)
+        : undefined;
+
+      await payment.update({
+        status: 'paid',
+        paidAt: new Date(object.captured_at || new Date()),
+        ...(incomeAmount !== undefined && { providerAmount: incomeAmount }),
+      });
+
+      // Update customer stats
+      await this.customerService.incrementStats(payment.customerId, Number(payment.totalAmount));
+
+      // Attempt delivery
+      await this.deliveryService.attemptDelivery(payment.id);
+
+      // Clear cache
+      const cacheKey = getCacheKey(payment.customerId, payment.productId);
+      paymentCache.delete(cacheKey);
+
+      console.log(`YooKassa: payment ${payment.id} succeeded (external: ${externalId})`);
+    } else if (event === 'payment.canceled' && payment.status === 'pending') {
+      await payment.update({
+        status: 'failed',
+        meta: {
+          ...payment.meta,
+          cancelReason: object.cancellation_details?.reason || 'unknown',
+          cancelParty: object.cancellation_details?.party || 'unknown',
+        },
+      });
+
+      // Clear cache
+      const cacheKey = getCacheKey(payment.customerId, payment.productId);
+      paymentCache.delete(cacheKey);
+
+      console.log(`YooKassa: payment ${payment.id} canceled (external: ${externalId})`);
+    } else if (event === 'payment.waiting_for_capture' && payment.status === 'pending') {
+      // Auto-capture: confirm the payment immediately
+      const provider = await PaymentProvider.findOne({ where: { providerId: 'yookassa' } });
+      if (provider) {
+        const { shopId, secretKey } = provider.credentials;
+        if (shopId && secretKey) {
+          const gateway = new YooKassaGateway(shopId, secretKey);
+          await gateway.capturePayment(externalId, Number(payment.totalAmount), payment.currency);
+        }
+      }
+    }
+  }
+
+  /**
+   * Called by webhook or admin to manually confirm a payment
    */
   async confirmPayment(paymentId: string): Promise<PaymentDto> {
     const payment = await Payment.findByPk(paymentId, {

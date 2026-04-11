@@ -36,4 +36,9 @@ export const config = {
     max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     timeWindow: parseInt(process.env.RATE_LIMIT_TIMEWINDOW || '60000', 10),
   },
+
+  payment: {
+    returnUrl: process.env.PAYMENT_RETURN_URL || 'http://localhost:3002/payment/success',
+    webhookBaseUrl: process.env.WEBHOOK_BASE_URL || 'http://localhost:3001',
+  },
 } as const;
