@@ -110,47 +110,61 @@ export class PaymentService {
       paymentCache.delete(cacheKey);
     }
 
-    // 4. Determine payment currency and commission from provider settings
+    // 4. Validate payment option and provider
+    const option = await PaymentOption.findByPk(data.paymentOptionId);
+    if (!option) {
+      throw new ValidationError('Payment option not found');
+    }
+
+    const provider = await PaymentProvider.findOne({ where: { providerId: option.providerId } });
+
+    // Check provider is usable (skip check if demo mode)
+    const settings = await this.settingsService.get();
+    if (!settings.demo_payments) {
+      if (!provider) {
+        throw new ValidationError(`Payment provider "${option.providerId}" not found`);
+      }
+      if (!provider.enabled) {
+        throw new PaymentError(
+          `Payment provider "${provider.name}" is not enabled. Enable it in admin panel.`,
+          'PROVIDER_DISABLED',
+        );
+      }
+    }
+
+    // 5. Determine payment currency and commission from provider settings
     const productPrice = Number(product.price);
     const productCurrency = product.currency;
-    let paymentCurrency = productCurrency; // fallback to product currency
+    let paymentCurrency = productCurrency;
     let commissionPercent = 0;
     let commissionAmount = 0;
     let totalAmount = productPrice;
     let providerAmount = productPrice;
 
-    const option = await PaymentOption.findByPk(data.paymentOptionId);
-    if (option) {
-      const provider = await PaymentProvider.findOne({ where: { providerId: option.providerId } });
-      if (provider) {
-        // Determine actual payment currency from provider
-        // If provider supports product currency — use it; otherwise use first supported
-        if (provider.supportedCurrencies.length > 0) {
-          paymentCurrency = provider.supportedCurrencies.includes(productCurrency)
-            ? productCurrency
-            : provider.supportedCurrencies[0];
-        }
+    if (provider) {
+      // Determine actual payment currency from provider
+      if (provider.supportedCurrencies.length > 0) {
+        paymentCurrency = provider.supportedCurrencies.includes(productCurrency)
+          ? productCurrency
+          : provider.supportedCurrencies[0];
+      }
 
-        // Find method commission from provider's methods array
-        const method = provider.methods.find((m) => m.id === option.methodId);
-        commissionPercent = method?.commission ?? 0;
-        commissionAmount = Math.round(productPrice * commissionPercent) / 100;
+      // Find method commission from provider's methods array
+      const method = provider.methods.find((m) => m.id === option.methodId);
+      commissionPercent = method?.commission ?? 0;
+      commissionAmount = Math.round(productPrice * commissionPercent) / 100;
 
-        const rule = provider.commissionRule;
-        if (rule.mode === 'buyer') {
-          // Buyer pays commission on top
-          totalAmount = productPrice + commissionAmount;
-          providerAmount = productPrice;
-        } else if (rule.mode === 'split') {
-          // Split: buyer pays half, seller absorbs half
-          const buyerShare = Math.round(commissionAmount * 50) / 100;
-          totalAmount = productPrice + buyerShare;
-          providerAmount = productPrice - (commissionAmount - buyerShare);
-        } else {
-          // Seller mode (default): commission deducted from seller's revenue
-          totalAmount = productPrice;
-          providerAmount = productPrice - commissionAmount;
-        }
+      const rule = provider.commissionRule;
+      if (rule.mode === 'buyer') {
+        totalAmount = productPrice + commissionAmount;
+        providerAmount = productPrice;
+      } else if (rule.mode === 'split') {
+        const buyerShare = Math.round(commissionAmount * 50) / 100;
+        totalAmount = productPrice + buyerShare;
+        providerAmount = productPrice - (commissionAmount - buyerShare);
+      } else {
+        totalAmount = productPrice;
+        providerAmount = productPrice - commissionAmount;
       }
     }
 
@@ -171,8 +185,7 @@ export class PaymentService {
       status: 'pending',
     });
 
-    // 6. Check if demo mode
-    const settings = await this.settingsService.get();
+    // 7. Check if demo mode
     if (settings.demo_payments) {
       // Demo: instantly mark as paid
       await payment.update({
@@ -193,18 +206,15 @@ export class PaymentService {
       return toDto(result!);
     }
 
-    // 7. Non-demo: cache the pending payment for 2 minutes
+    // 8. Non-demo: cache the pending payment for 2 minutes
     paymentCache.set(cacheKey, {
       paymentId: payment.id,
       expiresAt: Date.now() + CACHE_TTL,
     });
 
-    // 8. Create external payment via provider gateway
-    if (option) {
-      const provider = await PaymentProvider.findOne({ where: { providerId: option.providerId } });
-      if (provider && provider.enabled) {
-        await this.createExternalPayment(payment, provider, option.methodId, product.name);
-      }
+    // 9. Create external payment via provider gateway
+    if (provider && provider.enabled) {
+      await this.createExternalPayment(payment, provider, option.methodId, product.name);
     }
 
     const result = await Payment.findByPk(payment.id, {
