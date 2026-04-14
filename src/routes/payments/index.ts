@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { PaymentService } from '@/services/payment.service';
 import { DeliveryService } from '@/services/delivery.service';
+import { PaymentProvider } from '@/models/payment-provider.model';
 import type { PaymentStatus } from '@/models/payment.model';
 
 const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
@@ -90,6 +91,64 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     const payment = await service.findById(request.params.id);
     if (!payment) return reply.code(404).send({ error: 'Payment not found' });
     return payment;
+  });
+
+  // POST /payments/:id/simulate-webhook — admin only, simulate provider webhook (test mode)
+  fastify.post<{ Params: { id: string } }>('/:id/simulate-webhook', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const payment = await service.findById(request.params.id);
+    if (!payment) return reply.code(404).send({ error: 'Payment not found' });
+    if (payment.status !== 'pending') {
+      return reply.code(400).send({ error: 'Payment is not pending' });
+    }
+
+    // Check test mode on the provider
+    if (payment.providerId) {
+      const provider = await PaymentProvider.findOne({ where: { providerId: payment.providerId } });
+      if (provider && provider.credentials.testMode !== 'true') {
+        return reply.code(400).send({ error: 'Test mode is not enabled for this provider' });
+      }
+    }
+
+    // Simulate successful payment
+    if (payment.providerId === 'heleket') {
+      await service.handleHeleketWebhook({
+        type: 'payment',
+        uuid: payment.externalPaymentId || 'simulated',
+        order_id: payment.id,
+        amount: String(payment.totalAmount),
+        payment_amount: String(payment.totalAmount),
+        payment_amount_usd: '0',
+        merchant_amount: String(payment.providerAmount),
+        commission: String(payment.commissionAmount),
+        is_final: true,
+        status: 'paid',
+        from: 'simulated-test-address',
+        network: 'test',
+        currency: payment.currency,
+        payer_currency: payment.currency,
+        additional_data: null,
+        txid: `test-${Date.now()}`,
+        sign: 'simulated',
+      });
+    } else if (payment.providerId === 'yookassa') {
+      await service.handleYooKassaWebhook('payment.succeeded', {
+        id: payment.externalPaymentId,
+        status: 'succeeded',
+        amount: { value: String(payment.totalAmount), currency: payment.currency },
+        income_amount: { value: String(payment.providerAmount), currency: payment.currency },
+        paid: true,
+        captured_at: new Date().toISOString(),
+        metadata: { payment_id: payment.id },
+      });
+    } else {
+      // Generic: just confirm
+      await service.confirmPayment(payment.id);
+    }
+
+    const updated = await service.findById(request.params.id);
+    return updated;
   });
 };
 

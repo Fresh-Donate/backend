@@ -52,7 +52,7 @@ const DEFAULT_PROVIDERS: Array<{
     name: 'Heleket',
     description: 'Криптовалютные платежи: BTC, ETH, USDT и другие',
     icon: 'i-lucide-bitcoin',
-    credentials: { apiKey: '', merchantId: '' },
+    credentials: { apiKey: '', merchantId: '', testMode: 'false' },
     methods: [
       { id: 'btc', name: 'Bitcoin (BTC)', commission: 0.5, enabled: true },
       { id: 'eth', name: 'Ethereum (ETH)', commission: 0.5, enabled: true },
