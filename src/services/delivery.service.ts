@@ -2,6 +2,7 @@ import { Payment } from '@/models/payment.model';
 import { Product } from '@/models/product.model';
 import { Customer } from '@/models/customer.model';
 import { RconService, DeliveryLog } from './rcon.service';
+import { SettingsService } from './settings.service';
 
 const RETRY_DELAYS = [
   1 * 60 * 1000,   // 1 min
@@ -17,13 +18,23 @@ const scheduledRetries = new Set<string>();
 
 export class DeliveryService {
   private rconService = new RconService();
+  private settingsService = new SettingsService();
 
   /**
    * Attempt delivery for a paid payment.
+   * If delivery_method is 'plugin' — skip, the plugin will pick it up.
+   * If delivery_method is 'rcon' — execute via RCON with retries.
    * On success → status 'delivered'.
    * On failure → schedule retry or mark 'failed' after all attempts exhausted.
    */
   async attemptDelivery(paymentId: string): Promise<void> {
+    const settings = await this.settingsService.get();
+
+    // Plugin delivery: don't attempt RCON, leave as 'paid' for plugin to pick up
+    if (settings.delivery_method === 'plugin') {
+      return;
+    }
+
     const payment = await Payment.findByPk(paymentId, {
       include: [{ model: Customer, required: false }],
     });
