@@ -9,6 +9,7 @@ import { DeliveryService } from './delivery.service';
 import { NotFoundError, ValidationError, PaymentError } from '@/core';
 import { Op, fn, col, literal } from 'sequelize';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
+import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { config } from '@/config';
 
 export interface PaymentDto {
@@ -274,8 +275,34 @@ export class PaymentService {
         externalPaymentId: yooPayment.id,
         externalPaymentUrl: yooPayment.confirmation?.confirmation_url || null,
       });
+    } else if (provider.providerId === 'heleket') {
+      const { apiKey, merchantId } = provider.credentials;
+      if (!apiKey || !merchantId) {
+        throw new PaymentError(
+          'Heleket credentials not configured. Set apiKey and merchantId in payment provider settings.',
+          'HELEKET_NOT_CONFIGURED',
+        );
+      }
+
+      const gateway = new HeleketGateway(merchantId, apiKey);
+      const returnUrl = config.payment.returnUrl;
+      const webhookUrl = `${config.payment.webhookBaseUrl}/webhooks/heleket`;
+
+      const heleketPayment = await gateway.createPayment({
+        amount: Number(payment.totalAmount),
+        currency: payment.currency,
+        orderId: payment.id,
+        urlReturn: `${returnUrl}?paymentId=${payment.id}`,
+        urlSuccess: `${returnUrl}?paymentId=${payment.id}`,
+        urlCallback: webhookUrl,
+      });
+
+      await payment.update({
+        providerId: provider.providerId,
+        externalPaymentId: heleketPayment.uuid,
+        externalPaymentUrl: heleketPayment.url,
+      });
     }
-    // Future: else if (provider.providerId === 'heleket') { ... }
   }
 
   /**
@@ -295,16 +322,29 @@ export class PaymentService {
     }
 
     if (event === 'payment.succeeded' && payment.status === 'pending') {
-      // Payment succeeded — update actual amounts from YooKassa response
-      const incomeAmount = object.income_amount
-        ? Number(object.income_amount.value)
-        : undefined;
+      // Payment succeeded — update with REAL amounts from YooKassa
+      const paidAmount = object.amount ? Number(object.amount.value) : Number(payment.totalAmount);
+      const incomeAmount = object.income_amount ? Number(object.income_amount.value) : undefined;
 
-      await payment.update({
+      // Calculate real commission from actual YooKassa data
+      const updateData: Record<string, any> = {
         status: 'paid',
         paidAt: new Date(object.captured_at || new Date()),
-        ...(incomeAmount !== undefined && { providerAmount: incomeAmount }),
-      });
+        totalAmount: paidAmount,
+        currency: object.amount?.currency || payment.currency,
+      };
+
+      if (incomeAmount !== undefined) {
+        const realCommission = Math.round((paidAmount - incomeAmount) * 100) / 100;
+        const realPercent = paidAmount > 0
+          ? Math.round((realCommission / paidAmount) * 10000) / 100
+          : 0;
+        updateData.providerAmount = incomeAmount;
+        updateData.commissionAmount = realCommission;
+        updateData.commissionPercent = realPercent;
+      }
+
+      await payment.update(updateData);
 
       // Update customer stats
       await this.customerService.incrementStats(payment.customerId, Number(payment.totalAmount));
@@ -342,6 +382,100 @@ export class PaymentService {
           await gateway.capturePayment(externalId, Number(payment.totalAmount), payment.currency);
         }
       }
+    }
+  }
+
+  /**
+   * Handle Heleket webhook notification
+   * Success statuses: 'paid', 'paid_over'
+   * Fail statuses: 'cancel', 'fail', 'system_fail'
+   */
+  async handleHeleketWebhook(payload: Record<string, any>): Promise<void> {
+    // Heleket uses order_id = our payment.id
+    const paymentId = payload.order_id || payload.uuid;
+    if (!paymentId) return;
+
+    // Try by order_id first (our payment ID), fallback to externalPaymentId
+    let payment = await Payment.findByPk(paymentId, {
+      include: [{ model: Customer, required: false }],
+    });
+    if (!payment) {
+      payment = await Payment.findOne({
+        where: { externalPaymentId: payload.uuid },
+        include: [{ model: Customer, required: false }],
+      });
+    }
+    if (!payment) {
+      console.warn(`Heleket webhook: payment not found for order_id=${payload.order_id} uuid=${payload.uuid}`);
+      return;
+    }
+
+    const status = payload.status;
+    const isFinal = payload.is_final;
+
+    if ((status === 'paid' || status === 'paid_over') && payment.status === 'pending') {
+      // Payment succeeded — update with real amounts from Heleket
+      const paidAmount = payload.payment_amount ? Number(payload.payment_amount) : Number(payment.totalAmount);
+      const merchantAmount = payload.merchant_amount ? Number(payload.merchant_amount) : undefined;
+      const commission = payload.commission ? Number(payload.commission) : undefined;
+
+      const updateData: Record<string, any> = {
+        status: 'paid',
+        paidAt: new Date(),
+        currency: payload.payer_currency || payment.currency,
+      };
+
+      if (merchantAmount !== undefined && commission !== undefined) {
+        updateData.providerAmount = merchantAmount;
+        updateData.commissionAmount = commission;
+        updateData.commissionPercent = paidAmount > 0
+          ? Math.round((commission / paidAmount) * 10000) / 100
+          : 0;
+      }
+
+      // Store crypto-specific data in meta
+      updateData.meta = {
+        ...payment.meta,
+        heleket: {
+          txid: payload.txid,
+          network: payload.network,
+          payerCurrency: payload.payer_currency,
+          from: payload.from,
+          paymentAmountUsd: payload.payment_amount_usd,
+        },
+      };
+
+      await payment.update(updateData);
+
+      // Update customer stats
+      await this.customerService.incrementStats(payment.customerId, Number(payment.totalAmount));
+
+      // Attempt delivery
+      await this.deliveryService.attemptDelivery(payment.id);
+
+      // Clear cache
+      const cacheKey = getCacheKey(payment.customerId, payment.productId);
+      paymentCache.delete(cacheKey);
+
+      console.log(`Heleket: payment ${payment.id} succeeded (uuid: ${payload.uuid}, txid: ${payload.txid})`);
+
+    } else if (['cancel', 'fail', 'system_fail'].includes(status) && isFinal && payment.status === 'pending') {
+      await payment.update({
+        status: 'failed',
+        meta: {
+          ...payment.meta,
+          cancelReason: status,
+          heleket: {
+            uuid: payload.uuid,
+            network: payload.network,
+          },
+        },
+      });
+
+      const cacheKey = getCacheKey(payment.customerId, payment.productId);
+      paymentCache.delete(cacheKey);
+
+      console.log(`Heleket: payment ${payment.id} failed with status ${status} (uuid: ${payload.uuid})`);
     }
   }
 

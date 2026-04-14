@@ -1,6 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
 import { PaymentService } from '@/services/payment.service';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
+import { HeleketGateway } from '@/gateways/heleket.gateway';
+import { PaymentProvider } from '@/models/payment-provider.model';
 
 const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const paymentService = new PaymentService();
@@ -57,6 +59,57 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     }
 
     // Always respond 200 to acknowledge receipt
+    return reply.code(200).send({ status: 'ok' });
+  });
+
+  /**
+   * POST /webhooks/heleket — Heleket crypto payment notification
+   * @see https://docs.heleket.com
+   *
+   * Heleket sends a flat JSON with { type, uuid, order_id, status, sign, ... }
+   * Validated by signature + source IP
+   */
+  fastify.post<{
+    Body: Record<string, any>;
+  }>('/heleket', {
+    config: { rateLimit: { max: 200, timeWindow: 60000 } },
+  }, async (request, reply) => {
+    const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
+    const clientIp = forwardedFor || request.ip || '';
+
+    const skipIpCheck = process.env.NODE_ENV === 'development'
+      || process.env.HELEKET_SKIP_IP_CHECK === 'true';
+
+    if (!skipIpCheck && !HeleketGateway.isValidWebhookIp(clientIp)) {
+      request.log.warn(`Heleket webhook rejected: invalid source IP ${clientIp}`);
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
+
+    // Verify signature using provider credentials
+    const provider = await PaymentProvider.findOne({ where: { providerId: 'heleket' } });
+    if (!provider) {
+      request.log.error('Heleket webhook: provider not found in database');
+      return reply.code(200).send({ status: 'ok' });
+    }
+
+    const { apiKey, merchantId } = provider.credentials;
+    if (apiKey) {
+      const gateway = new HeleketGateway(merchantId, apiKey);
+      if (!gateway.verifyWebhookSignature(request.body)) {
+        request.log.warn('Heleket webhook rejected: invalid signature');
+        return reply.code(403).send({ error: 'Invalid signature' });
+      }
+    }
+
+    const payload = request.body;
+    request.log.info(`Heleket webhook: status=${payload.status} uuid=${payload.uuid} order=${payload.order_id}`);
+
+    try {
+      await paymentService.handleHeleketWebhook(payload);
+    } catch (error: any) {
+      request.log.error(`Heleket webhook processing error: ${error.message}`);
+    }
+
     return reply.code(200).send({ status: 'ok' });
   });
 };
