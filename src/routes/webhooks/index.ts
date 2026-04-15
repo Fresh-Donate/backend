@@ -74,22 +74,19 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   }>('/heleket', {
     config: { rateLimit: { max: 200, timeWindow: 60000 } },
   }, async (request, reply) => {
-    // Load provider first to check test mode
     const provider = await PaymentProvider.findOne({ where: { providerId: 'heleket' } });
     if (!provider) {
       request.log.error('Heleket webhook: provider not found in database');
       return reply.code(200).send({ status: 'ok' });
     }
 
-    const isTestMode = provider.credentials.testMode === 'true';
     const { apiKey, merchantId } = provider.credentials;
 
-    // IP validation (skip in test mode or dev)
+    // IP validation
     const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
     const clientIp = forwardedFor || request.ip || '';
 
-    const skipIpCheck = isTestMode
-      || process.env.NODE_ENV === 'development'
+    const skipIpCheck = process.env.NODE_ENV === 'development'
       || process.env.HELEKET_SKIP_IP_CHECK === 'true';
 
     if (!skipIpCheck && !HeleketGateway.isValidWebhookIp(clientIp)) {
@@ -97,8 +94,8 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       return reply.code(403).send({ error: 'Forbidden' });
     }
 
-    // Skip signature verification in test mode
-    if (!isTestMode && apiKey) {
+    // Signature verification
+    if (apiKey) {
       const gateway = new HeleketGateway(merchantId, apiKey);
       if (!gateway.verifyWebhookSignature(request.body)) {
         request.log.warn('Heleket webhook rejected: invalid signature');

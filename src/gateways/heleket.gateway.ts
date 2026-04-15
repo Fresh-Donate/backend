@@ -158,47 +158,6 @@ export class HeleketGateway {
   }
 
   /**
-   * Send a test webhook via Heleket API.
-   * Heleket will POST a real webhook to the url_callback with simulated data.
-   * @see https://doc.heleket.com/methods/payments/testing-webhook
-   */
-  async sendTestWebhook(params: {
-    urlCallback: string;
-    currency: string;
-    network: string;
-    uuid?: string;
-    orderId?: string;
-    status?: string;
-  }): Promise<void> {
-    const body: Record<string, unknown> = {
-      url_callback: params.urlCallback,
-      currency: params.currency,
-      network: params.network,
-    };
-
-    if (params.uuid) body.uuid = params.uuid;
-    if (params.orderId) body.order_id = params.orderId;
-    if (params.status) body.status = params.status;
-
-    try {
-      const { data } = await this.client.post<{ state: number; result: any }>('/test-webhook/payment', body, {
-        headers: {
-          merchant: this.merchantId,
-          sign: this.sign(body),
-        },
-      });
-
-      if (data.state !== 0) {
-        throw new PaymentError(`Heleket test-webhook returned state ${data.state}`, 'HELEKET_TEST_WEBHOOK_ERROR');
-      }
-    } catch (error: any) {
-      if (error instanceof PaymentError) throw error;
-      const msg = error.response?.data?.message || error.message;
-      throw new PaymentError(`Heleket test-webhook failed: ${msg}`, 'HELEKET_TEST_WEBHOOK_ERROR');
-    }
-  }
-
-  /**
    * Validate webhook source IP
    */
   static isValidWebhookIp(ip: string): boolean {
