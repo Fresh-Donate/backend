@@ -4,6 +4,7 @@ export interface ShopSettingsDto {
   name: string;
   description: string;
   color: string;
+  ip: string;
 }
 
 export class ShopSettingsService {
@@ -17,6 +18,7 @@ export class ShopSettingsService {
         name: 'FreshDonate Shop',
         description: '',
         color: 'sky',
+        ip: 'play.example.com',
       },
     });
 
@@ -24,6 +26,7 @@ export class ShopSettingsService {
       name: settings.name,
       description: settings.description,
       color: settings.color,
+      ip: settings.ip
     };
   }
 
@@ -37,6 +40,7 @@ export class ShopSettingsService {
         name: 'FreshDonate Shop',
         description: '',
         color: 'sky',
+        ip: 'play.example.com'
       },
     });
 
@@ -46,6 +50,7 @@ export class ShopSettingsService {
       name: settings.name,
       description: settings.description,
       color: settings.color,
+      ip: settings.ip
     };
   }
 }

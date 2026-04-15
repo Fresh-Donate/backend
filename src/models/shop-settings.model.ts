@@ -12,11 +12,12 @@ interface ShopSettingsAttributes {
   name: string;
   description: string;
   color: string;
+  ip: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
-type ShopSettingsCreationAttributes = Optional<ShopSettingsAttributes, 'id' | 'name' | 'description' | 'color' | 'createdAt' | 'updatedAt'>;
+type ShopSettingsCreationAttributes = Optional<ShopSettingsAttributes, 'id' | 'name' | 'description' | 'color' | 'ip' | 'createdAt' | 'updatedAt'>;
 
 @Table({ tableName: 'shop_settings' })
 export class ShopSettings extends BaseModel<ShopSettingsAttributes, ShopSettingsCreationAttributes> {
@@ -31,4 +32,8 @@ export class ShopSettings extends BaseModel<ShopSettingsAttributes, ShopSettings
   @Default('sky')
   @Column(DataType.STRING(32))
   declare color: string;
+
+  @Default('play.example.com')
+  @Column(DataType.STRING(64))
+  declare ip: string;
 }

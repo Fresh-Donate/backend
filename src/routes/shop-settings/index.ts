@@ -11,7 +11,7 @@ const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> =>
 
   // PUT /shop-settings — admin only
   fastify.put<{
-    Body: { name?: string; description?: string; color?: string };
+    Body: { name?: string; description?: string; color?: string; ip?: string };
   }>('/', {
     onRequest: [fastify.authenticate],
     schema: {
@@ -21,12 +21,13 @@ const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> =>
           name: { type: 'string', minLength: 1, maxLength: 64 },
           description: { type: 'string', maxLength: 500 },
           color: { type: 'string', minLength: 1, maxLength: 32 },
+          ip: { type: 'string', minLength: 1, maxLength: 64 },
         },
       },
     },
   }, async (request) => {
-    const { name, description, color } = request.body;
-    return service.update({ name, description, color });
+    const { name, description, color, ip } = request.body;
+    return service.update({ name, description, color, ip });
   });
 };
 
