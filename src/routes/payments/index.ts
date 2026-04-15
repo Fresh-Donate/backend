@@ -120,14 +120,29 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
     if (payment.providerId === 'heleket') {
       // Use Heleket's official test-webhook API
-      // Heleket sends a real webhook to our callback URL
+      // First, fetch the invoice from Heleket to get correct currency & network
       const gateway = new HeleketGateway(provider.credentials.merchantId, provider.credentials.apiKey);
       const callbackUrl = `${config.payment.webhookBaseUrl}/webhooks/heleket`;
 
+      let invoiceCurrency = payment.currency;
+      let invoiceNetwork = 'tron';
+
+      if (payment.externalPaymentId) {
+        try {
+          const invoiceInfo = await gateway.getPayment(payment.externalPaymentId);
+          invoiceCurrency = invoiceInfo.currency || invoiceCurrency;
+          invoiceNetwork = invoiceInfo.network || invoiceNetwork;
+        } catch {
+          // If we can't fetch info, use defaults — test-webhook may still work
+          request.log.warn('Could not fetch Heleket invoice info, using defaults');
+        }
+      }
+
       await gateway.sendTestWebhook({
         urlCallback: callbackUrl,
-        currency: payment.currency,
-        network: 'tron',
+        currency: invoiceCurrency,
+        network: invoiceNetwork,
+        uuid: payment.externalPaymentId || undefined,
         orderId: payment.id,
         status: 'paid',
       });
