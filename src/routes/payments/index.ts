@@ -2,6 +2,8 @@ import { FastifyPluginAsync } from 'fastify';
 import { PaymentService } from '@/services/payment.service';
 import { DeliveryService } from '@/services/delivery.service';
 import { PaymentProvider } from '@/models/payment-provider.model';
+import { HeleketGateway } from '@/gateways/heleket.gateway';
+import { config } from '@/config';
 import type { PaymentStatus } from '@/models/payment.model';
 
 const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
@@ -93,7 +95,7 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return payment;
   });
 
-  // POST /payments/:id/simulate-webhook — admin only, simulate provider webhook (test mode)
+  // POST /payments/:id/simulate-webhook — admin only, trigger test webhook from provider (test mode)
   fastify.post<{ Params: { id: string } }>('/:id/simulate-webhook', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
@@ -104,35 +106,37 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     }
 
     // Check test mode on the provider
-    if (payment.providerId) {
-      const provider = await PaymentProvider.findOne({ where: { providerId: payment.providerId } });
-      if (provider && provider.credentials.testMode !== 'true') {
-        return reply.code(400).send({ error: 'Test mode is not enabled for this provider' });
-      }
+    if (!payment.providerId) {
+      return reply.code(400).send({ error: 'Payment has no provider' });
     }
 
-    // Simulate successful payment
+    const provider = await PaymentProvider.findOne({ where: { providerId: payment.providerId } });
+    if (!provider) {
+      return reply.code(400).send({ error: 'Provider not found' });
+    }
+    if (provider.credentials.testMode !== 'true') {
+      return reply.code(400).send({ error: 'Тестовый режим не включён для этого провайдера' });
+    }
+
     if (payment.providerId === 'heleket') {
-      await service.handleHeleketWebhook({
-        type: 'payment',
-        uuid: payment.externalPaymentId || 'simulated',
-        order_id: payment.id,
-        amount: String(payment.totalAmount),
-        payment_amount: String(payment.totalAmount),
-        payment_amount_usd: '0',
-        merchant_amount: String(payment.providerAmount),
-        commission: String(payment.commissionAmount),
-        is_final: true,
-        status: 'paid',
-        from: 'simulated-test-address',
-        network: 'test',
+      // Use Heleket's official test-webhook API
+      // Heleket sends a real webhook to our callback URL
+      const gateway = new HeleketGateway(provider.credentials.merchantId, provider.credentials.apiKey);
+      const callbackUrl = `${config.payment.webhookBaseUrl}/webhooks/heleket`;
+
+      await gateway.sendTestWebhook({
+        urlCallback: callbackUrl,
         currency: payment.currency,
-        payer_currency: payment.currency,
-        additional_data: null,
-        txid: `test-${Date.now()}`,
-        sign: 'simulated',
+        network: 'tron',
+        orderId: payment.id,
+        status: 'paid',
       });
+
+      // Heleket sends the webhook asynchronously, wait a bit and return current state
+      // The actual status update happens via the webhook handler
+      await new Promise(resolve => setTimeout(resolve, 2000));
     } else if (payment.providerId === 'yookassa') {
+      // YooKassa doesn't have a test-webhook API, simulate locally
       await service.handleYooKassaWebhook('payment.succeeded', {
         id: payment.externalPaymentId,
         status: 'succeeded',
@@ -143,7 +147,6 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         metadata: { payment_id: payment.id },
       });
     } else {
-      // Generic: just confirm
       await service.confirmPayment(payment.id);
     }
 
