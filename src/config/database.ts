@@ -36,6 +36,10 @@ export const sequelize = new Sequelize({
 });
 
 export async function initDatabase(): Promise<void> {
+  if (process.env.SKIP_DB === 'true') {
+    console.log('SKIP_DB=true — skipping database initialization');
+    return;
+  }
   try {
     await sequelize.authenticate();
     console.log('Database connection established successfully.');
