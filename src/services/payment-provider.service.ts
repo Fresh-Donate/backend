@@ -1,4 +1,4 @@
-import { PaymentProvider, PaymentMethodData, CommissionRuleData } from '@/models/payment-provider.model';
+import { PaymentProvider, type PaymentMethodData, type CommissionRuleData } from '@/models/payment-provider.model';
 import { NotFoundError } from '@/core';
 
 export interface PaymentProviderDto {

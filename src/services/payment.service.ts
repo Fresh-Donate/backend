@@ -1,4 +1,4 @@
-import { Payment, PaymentStatus } from '@/models/payment.model';
+import { Payment, type PaymentStatus } from '@/models/payment.model';
 import { Customer } from '@/models/customer.model';
 import { Product } from '@/models/product.model';
 import { PaymentOption } from '@/models/payment-option.model';
@@ -204,7 +204,8 @@ export class PaymentService {
       const result = await Payment.findByPk(payment.id, {
         include: [{ model: Customer, required: false }],
       });
-      return toDto(result!);
+      if (!result) throw new Error('Payment vanished after creation');
+      return toDto(result);
     }
 
     // 8. Non-demo: cache the pending payment for 2 minutes
@@ -221,7 +222,8 @@ export class PaymentService {
     const result = await Payment.findByPk(payment.id, {
       include: [{ model: Customer, required: false }],
     });
-    return toDto(result!);
+    if (!result) throw new Error('Payment vanished after creation');
+    return toDto(result);
   }
 
   /**
@@ -565,7 +567,7 @@ export class PaymentService {
   }> {
     const paidWhere = { status: { [Op.in]: ['paid', 'delivered'] } };
 
-    const [revenueByCurrency, totalPayments, totalCustomers, recentRows] = await Promise.all([
+    const [revenueRaw, totalPayments, totalCustomers, recentRows] = await Promise.all([
       Payment.findAll({
         attributes: [
           'currency',
@@ -576,7 +578,7 @@ export class PaymentService {
         where: paidWhere,
         group: ['currency'],
         raw: true,
-      }) as unknown as { currency: string; total: string; commission: string; provider: string }[],
+      }),
       Payment.count({ where: paidWhere }),
       Customer.count(),
       Payment.findAll({
@@ -585,6 +587,10 @@ export class PaymentService {
         limit: 10,
       }),
     ]);
+
+    const revenueByCurrency = revenueRaw as unknown as {
+      currency: string; total: string; commission: string; provider: string;
+    }[];
 
     return {
       revenueByCurrency: revenueByCurrency.map((r) => ({

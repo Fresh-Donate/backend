@@ -62,7 +62,7 @@ export class RconService {
 
       return results;
     } finally {
-      rcon.end();
+      void rcon.end();
     }
   }
 

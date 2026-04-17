@@ -1,5 +1,5 @@
 import fp from 'fastify-plugin';
-import { FastifyError } from 'fastify';
+import { type FastifyError } from 'fastify';
 import { AppError } from '@/core/errors';
 import { EntityNotFoundError } from '@/core/base.service';
 

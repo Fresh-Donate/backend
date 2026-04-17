@@ -1,5 +1,5 @@
-import { FastifyPluginAsync } from 'fastify';
-import { PaymentProviderService, UpdatePaymentProviderDto } from '@/services/payment-provider.service';
+import { type FastifyPluginAsync } from 'fastify';
+import { PaymentProviderService, type UpdatePaymentProviderDto } from '@/services/payment-provider.service';
 
 const paymentProviderRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentProviderService();

@@ -1,4 +1,4 @@
-import { FastifyPluginAsync } from 'fastify';
+import { type FastifyPluginAsync } from 'fastify';
 import { PaymentService } from '@/services/payment.service';
 import { DeliveryService } from '@/services/delivery.service';
 import type { PaymentStatus } from '@/models/payment.model';

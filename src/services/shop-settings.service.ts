@@ -26,7 +26,7 @@ export class ShopSettingsService {
       name: settings.name,
       description: settings.description,
       color: settings.color,
-      ip: settings.ip
+      ip: settings.ip,
     };
   }
 
@@ -40,7 +40,7 @@ export class ShopSettingsService {
         name: 'FreshDonate Shop',
         description: '',
         color: 'sky',
-        ip: 'play.example.com'
+        ip: 'play.example.com',
       },
     });
 
@@ -50,7 +50,7 @@ export class ShopSettingsService {
       name: settings.name,
       description: settings.description,
       color: settings.color,
-      ip: settings.ip
+      ip: settings.ip,
     };
   }
 }

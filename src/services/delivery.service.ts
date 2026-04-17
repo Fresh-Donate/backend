@@ -1,7 +1,7 @@
 import { Payment } from '@/models/payment.model';
 import { Product } from '@/models/product.model';
 import { Customer } from '@/models/customer.model';
-import { RconService, DeliveryLog } from './rcon.service';
+import { RconService, type DeliveryLog } from './rcon.service';
 import { SettingsService } from './settings.service';
 
 const RETRY_DELAYS = [
@@ -110,9 +110,9 @@ export class DeliveryService {
   ): void {
     if (currentAttempt >= MAX_ATTEMPTS) {
       // All attempts exhausted — mark as failed
-      Payment.findByPk(paymentId).then((payment) => {
+      void Payment.findByPk(paymentId).then(async (payment) => {
         if (payment && payment.status === 'paid') {
-          payment.update({ status: 'failed' });
+          await payment.update({ status: 'failed' });
         }
       });
       scheduledRetries.delete(paymentId);
@@ -125,7 +125,7 @@ export class DeliveryService {
     const delay = RETRY_DELAYS[currentAttempt - 1];
     setTimeout(() => {
       scheduledRetries.delete(paymentId);
-      this.attemptDelivery(paymentId);
+      void this.attemptDelivery(paymentId);
     }, delay);
   }
 

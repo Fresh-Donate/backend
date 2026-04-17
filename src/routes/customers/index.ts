@@ -1,4 +1,4 @@
-import { FastifyPluginAsync } from 'fastify';
+import { type FastifyPluginAsync } from 'fastify';
 import { CustomerService } from '@/services/customer.service';
 import { PaymentService } from '@/services/payment.service';
 

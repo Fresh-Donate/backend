@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { type AxiosInstance } from 'axios';
 import { randomUUID } from 'node:crypto';
 import { PaymentError } from '@/core/errors';
 

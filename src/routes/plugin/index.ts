@@ -1,4 +1,4 @@
-import { FastifyPluginAsync } from 'fastify';
+import { type FastifyPluginAsync } from 'fastify';
 import { Payment } from '@/models/payment.model';
 import { Product } from '@/models/product.model';
 import { Customer } from '@/models/customer.model';

@@ -1,5 +1,5 @@
-import { FastifyPluginAsync } from 'fastify';
-import { SettingsService, SettingsDto } from '@/services/settings.service';
+import { type FastifyPluginAsync } from 'fastify';
+import { SettingsService, type SettingsDto } from '@/services/settings.service';
 
 const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new SettingsService();

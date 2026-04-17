@@ -1,4 +1,4 @@
-import { FastifyRequest, FastifyReply } from 'fastify';
+import { type FastifyRequest, type FastifyReply } from 'fastify';
 
 export interface PaginationQuery {
   page?: number;

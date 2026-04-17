@@ -1,4 +1,4 @@
-import { FastifyPluginAsync } from 'fastify';
+import { type FastifyPluginAsync } from 'fastify';
 import { config } from '@/config';
 import { UnauthorizedError } from '@/core';
 import crypto from 'node:crypto';

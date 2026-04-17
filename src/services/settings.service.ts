@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { Settings, DeliveryMethod } from '@/models/settings.model';
+import { Settings, type DeliveryMethod } from '@/models/settings.model';
 
 export interface SettingsDto {
   demo_payments: boolean;
