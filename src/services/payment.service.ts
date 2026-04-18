@@ -195,9 +195,6 @@ export class PaymentService {
         meta: { demo: true },
       });
 
-      // Update customer stats
-      await this.customerService.incrementStats(customer.id, totalAmount);
-
       // Attempt delivery (RCON with retries)
       await this.deliveryService.attemptDelivery(payment.id);
 
@@ -348,9 +345,6 @@ export class PaymentService {
 
       await payment.update(updateData);
 
-      // Update customer stats
-      await this.customerService.incrementStats(payment.customerId, Number(payment.totalAmount));
-
       // Attempt delivery
       await this.deliveryService.attemptDelivery(payment.id);
 
@@ -449,9 +443,6 @@ export class PaymentService {
 
       await payment.update(updateData);
 
-      // Update customer stats
-      await this.customerService.incrementStats(payment.customerId, Number(payment.totalAmount));
-
       // Attempt delivery
       await this.deliveryService.attemptDelivery(payment.id);
 
@@ -495,9 +486,6 @@ export class PaymentService {
       status: 'paid',
       paidAt: new Date(),
     });
-
-    // Update customer stats
-    await this.customerService.incrementStats(payment.customerId, Number(payment.totalAmount));
 
     // Attempt delivery (RCON with retries)
     await this.deliveryService.attemptDelivery(payment.id);

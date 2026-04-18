@@ -1,43 +1,79 @@
 import { Customer } from '@/models/customer.model';
-import { Op } from 'sequelize';
+import { Payment } from '@/models/payment.model';
+import { Op, fn, col, literal } from 'sequelize';
+
+export interface CustomerCurrencyStats {
+  currency: string;
+  totalSpent: number;
+  purchaseCount: number;
+}
 
 export interface CustomerDto {
   id: string;
   nickname: string;
   email: string;
-  totalSpent: number;
-  purchaseCount: number;
+  stats: CustomerCurrencyStats[];
   createdAt: string;
   updatedAt: string;
 }
 
-function toDto(c: Customer): CustomerDto {
+// Учитываются только успешные платежи
+const COUNTED_STATUSES = ['paid', 'delivered'];
+
+function toDto(c: Customer, stats: CustomerCurrencyStats[]): CustomerDto {
   return {
     id: c.id,
     nickname: c.nickname,
     email: c.email,
-    totalSpent: Number(c.totalSpent),
-    purchaseCount: c.purchaseCount,
+    stats,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
   };
 }
 
+async function aggregateStatsForCustomers(customerIds: string[]): Promise<Map<string, CustomerCurrencyStats[]>> {
+  const map = new Map<string, CustomerCurrencyStats[]>();
+  if (customerIds.length === 0) return map;
+
+  const rows = await Payment.findAll({
+    attributes: [
+      'customerId',
+      'currency',
+      [fn('SUM', col('total_amount')), 'totalSpent'],
+      [fn('COUNT', literal('*')), 'purchaseCount'],
+    ],
+    where: {
+      customerId: { [Op.in]: customerIds },
+      status: { [Op.in]: COUNTED_STATUSES },
+    },
+    group: ['customerId', 'currency'],
+    raw: true,
+  }) as unknown as Array<{
+    customerId: string;
+    currency: string;
+    totalSpent: string | number;
+    purchaseCount: string | number;
+  }>;
+
+  for (const row of rows) {
+    const list = map.get(row.customerId) ?? [];
+    list.push({
+      currency: row.currency,
+      totalSpent: Number(row.totalSpent),
+      purchaseCount: Number(row.purchaseCount),
+    });
+    map.set(row.customerId, list);
+  }
+  return map;
+}
+
 export class CustomerService {
-  /**
-   * Find or create a customer by nickname + email.
-   * If a customer with the same nickname exists, update email.
-   * If a customer with the same email exists, update nickname.
-   */
   async findOrCreate(nickname: string, email: string): Promise<CustomerDto> {
     let customer = await Customer.findOne({
-      where: {
-        [Op.or]: [{ nickname }, { email }],
-      },
+      where: { [Op.or]: [{ nickname }, { email }] },
     });
 
     if (customer) {
-      // Update if changed
       if (customer.nickname !== nickname || customer.email !== email) {
         await customer.update({ nickname, email });
       }
@@ -45,7 +81,8 @@ export class CustomerService {
       customer = await Customer.create({ nickname, email });
     }
 
-    return toDto(customer);
+    const statsMap = await aggregateStatsForCustomers([customer.id]);
+    return toDto(customer, statsMap.get(customer.id) ?? []);
   }
 
   async findAll(options?: { search?: string; limit?: number; offset?: number }): Promise<{ items: CustomerDto[]; total: number }> {
@@ -64,19 +101,18 @@ export class CustomerService {
       offset: options?.offset || 0,
     });
 
-    return { items: rows.map(toDto), total: count };
+    const statsMap = await aggregateStatsForCustomers(rows.map((r) => r.id));
+    return {
+      items: rows.map((r) => toDto(r, statsMap.get(r.id) ?? [])),
+      total: count,
+    };
   }
 
   async findById(id: string): Promise<CustomerDto | null> {
     const customer = await Customer.findByPk(id);
-    return customer ? toDto(customer) : null;
-  }
-
-  async incrementStats(customerId: string, amount: number): Promise<void> {
-    await Customer.increment(
-      { totalSpent: amount, purchaseCount: 1 },
-      { where: { id: customerId } },
-    );
+    if (!customer) return null;
+    const statsMap = await aggregateStatsForCustomers([id]);
+    return toDto(customer, statsMap.get(id) ?? []);
   }
 
   async getCount(): Promise<number> {

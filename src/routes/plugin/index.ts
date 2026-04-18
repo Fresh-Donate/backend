@@ -3,7 +3,6 @@ import { Payment } from '@/models/payment.model';
 import { Product } from '@/models/product.model';
 import { Customer } from '@/models/customer.model';
 import { SettingsService } from '@/services/settings.service';
-import { CustomerService } from '@/services/customer.service';
 
 const settingsService = new SettingsService();
 
@@ -138,10 +137,6 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         deliveredAt: new Date(),
         meta: newMeta,
       });
-
-      // Update customer stats
-      const customerService = new CustomerService();
-      await customerService.incrementStats(payment.customerId, Number(payment.totalAmount));
     } else {
       await payment.update({ meta: newMeta });
       payment.changed('meta', true);
