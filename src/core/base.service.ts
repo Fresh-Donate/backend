@@ -1,6 +1,6 @@
-import { Model } from 'sequelize-typescript';
-import { FindOptions } from 'sequelize';
-import { BaseRepository } from './base.repository';
+import { type Model } from 'sequelize-typescript';
+import { type FindOptions } from 'sequelize';
+import { type BaseRepository } from './base.repository';
 
 export abstract class BaseService<T extends Model> {
   constructor(protected readonly repository: BaseRepository<T>) {}

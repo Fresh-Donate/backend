@@ -1,25 +1,27 @@
 import 'reflect-metadata';
 import { join } from 'node:path';
-import AutoLoad, { AutoloadPluginOptions } from '@fastify/autoload';
-import { FastifyPluginAsync, FastifyServerOptions } from 'fastify';
-import { initDatabase } from './config/database';
+import AutoLoad, { type AutoloadPluginOptions } from '@fastify/autoload';
+import { type FastifyPluginAsync, type FastifyServerOptions } from 'fastify';
+import { initDatabase } from '@/config/database';
 
 export interface AppOptions extends FastifyServerOptions, Partial<AutoloadPluginOptions> {}
 
-const options: AppOptions = {};
+const options: AppOptions = {
+  trustProxy: true,
+};
 
 const app: FastifyPluginAsync<AppOptions> = async (fastify, opts): Promise<void> => {
   // Initialize database connection
   await initDatabase();
 
   // Load all plugins (cors, jwt, rate-limit, error-handler, sensible)
-  void fastify.register(AutoLoad, {
+  await fastify.register(AutoLoad, {
     dir: join(__dirname, 'plugins'),
     options: opts,
   });
 
   // Load all routes
-  void fastify.register(AutoLoad, {
+  await fastify.register(AutoLoad, {
     dir: join(__dirname, 'routes'),
     options: opts,
     routeParams: true,

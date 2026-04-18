@@ -1,40 +1,41 @@
-// This file contains code that we reuse between our tests.
-import * as path from 'node:path'
-import * as test from 'node:test'
-const helper = require('fastify-cli/helper.js')
+// Shared test helpers: fastify app bootstrap and common utilities
+import * as path from 'node:path';
+import * as test from 'node:test';
+
+// Force skip DB connection for tests
+process.env.SKIP_DB = 'true';
+process.env.SKIP_REDIS = 'true';
+process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = 'test-secret-for-testing-only';
+
+// Disable HTTP proxies so nock can intercept axios calls
+delete process.env.HTTP_PROXY;
+delete process.env.HTTPS_PROXY;
+delete process.env.http_proxy;
+delete process.env.https_proxy;
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const helper = require('fastify-cli/helper.js');
 
 export type TestContext = {
-  after: typeof test.after
+  after: typeof test.after;
+};
+
+const AppPath = path.join(__dirname, '..', 'src', 'app.ts');
+
+function config() {
+  return { skipOverride: true };
 }
 
-const AppPath = path.join(__dirname, '..', 'src', 'app.ts')
-
-// Fill in this config with all the configurations
-// needed for testing the application
-function config () {
-  return {
-    skipOverride: true // Register our application with fastify-plugin
-  }
+/**
+ * Bootstrap the full Fastify app (without DB connection).
+ * Use for route / plugin integration tests that don't hit the DB directly.
+ */
+async function build(t: TestContext) {
+  const argv = [AppPath];
+  const app = await helper.build(argv, config());
+  t.after(() => void app.close());
+  return app;
 }
 
-// Automatically build and tear down our instance
-async function build (t: TestContext) {
-  // you can set all the options supported by the fastify CLI command
-  const argv = [AppPath]
-
-  // fastify-plugin ensures that all decorators
-  // are exposed for testing purposes, this is
-  // different from the production setup
-  const app = await helper.build(argv, config())
-
-  // Tear down our app after we are done
-  // eslint-disable-next-line no-void
-  t.after(() => void app.close())
-
-  return app
-}
-
-export {
-  config,
-  build
-}
+export { config, build };

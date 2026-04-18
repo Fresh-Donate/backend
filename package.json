@@ -6,13 +6,18 @@
   "directories": {
     "test": "test"
   },
+  "_moduleAliases": {
+    "@": "dist"
+  },
   "scripts": {
-    "test": "npm run build:ts && tsc -p test/tsconfig.json && c8 node --test -r ts-node/register \"test/**/*.ts\"",
-    "start": "npm run build:ts && fastify start -l info dist/app.js",
-    "build:ts": "tsc",
-    "watch:ts": "tsc -w",
-    "dev": "npm run build:ts && concurrently -k -p \"[{name}]\" -n \"TypeScript,App\" -c \"yellow.bold,cyan.bold\" \"npm:watch:ts\" \"npm:dev:start\"",
-    "dev:start": "fastify start --ignore-watch=.ts$ -w -l info -P dist/app.js"
+    "test": "npm run build:ts && tsc -p test/tsconfig.json && c8 node --test --test-concurrency=1 -r ts-node/register -r tsconfig-paths/register -r ./test/setup.ts \"test/**/*.ts\"",
+    "start": "npm run build:ts && fastify start -r module-alias/register -l info dist/app.js",
+    "build:ts": "tsc && tsc-alias",
+    "dev": "npm run build:ts && concurrently -k -p \"[{name}]\" -n \"TypeScript,App\" -c \"yellow.bold,cyan.bold\" \"npm:dev:watch\" \"npm:dev:start\"",
+    "dev:watch": "tsc -w",
+    "dev:start": "fastify start -r module-alias/register --ignore-watch=.ts$ -w -l info -P dist/app.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "keywords": [],
   "author": "",
@@ -22,29 +27,39 @@
     "@fastify/cors": "^11.2.0",
     "@fastify/jwt": "^10.0.0",
     "@fastify/rate-limit": "^10.3.0",
+    "@fastify/redis": "^7.2.0",
     "@fastify/sensible": "^6.0.0",
     "axios": "^1.14.0",
     "bcrypt": "^6.0.0",
-    "dotenv": "^17.3.1",
     "fastify": "^5.0.0",
     "fastify-cli": "^7.4.1",
     "fastify-plugin": "^5.0.0",
+    "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.3",
+    "module-alias": "^2.3.4",
     "pg": "^8.20.0",
     "pg-hstore": "^2.3.4",
+    "rcon-client": "^4.2.5",
     "reflect-metadata": "^0.2.2",
     "sequelize": "^6.37.8",
     "sequelize-typescript": "^2.1.6"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/bcrypt": "^6.0.0",
+    "@types/ioredis": "^4.28.10",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.0.8",
     "@types/pg": "^8.20.0",
     "c8": "^10.1.2",
     "concurrently": "^9.0.0",
+    "eslint": "^10.2.0",
     "fastify-tsconfig": "^3.0.0",
+    "nock": "^13.5.6",
     "ts-node": "^10.4.0",
-    "typescript": "~5.9.2"
+    "tsc-alias": "^1.8.16",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "~5.9.2",
+    "typescript-eslint": "^8.58.2"
   }
 }

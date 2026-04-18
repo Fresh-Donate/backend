@@ -1,11 +1,11 @@
-import { Model } from 'sequelize-typescript';
+import { type Model } from 'sequelize-typescript';
 import {
-  ModelStatic,
-  FindOptions,
-  CreateOptions,
-  UpdateOptions,
-  DestroyOptions,
-  WhereOptions,
+  type ModelStatic,
+  type FindOptions,
+  type CreateOptions,
+  type UpdateOptions,
+  type DestroyOptions,
+  type WhereOptions,
 } from 'sequelize';
 
 export abstract class BaseRepository<T extends Model> {

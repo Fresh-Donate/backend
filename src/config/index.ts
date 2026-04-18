@@ -1,6 +1,3 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
 export const config = {
   server: {
     host: process.env.HOST || '0.0.0.0',
@@ -15,6 +12,11 @@ export const config = {
     password: process.env.DB_PASSWORD || 'postgres',
   },
 
+  admin: {
+    login: process.env.ADMIN_LOGIN || 'admin',
+    password: process.env.ADMIN_PASSWORD || 'admin',
+  },
+
   jwt: {
     secret: process.env.JWT_SECRET || 'change-me-to-a-random-secret-in-production',
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
@@ -24,8 +26,19 @@ export const config = {
     origin: (process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:3002').split(','),
   },
 
+  redis: {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379', 10),
+    password: process.env.REDIS_PASSWORD || '',
+  },
+
   rateLimit: {
     max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     timeWindow: parseInt(process.env.RATE_LIMIT_TIMEWINDOW || '60000', 10),
+  },
+
+  payment: {
+    returnUrl: process.env.PAYMENT_RETURN_URL || 'http://localhost:3002/payment/success',
+    webhookBaseUrl: process.env.WEBHOOK_BASE_URL || 'http://localhost:3001',
   },
 } as const;
