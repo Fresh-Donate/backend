@@ -98,18 +98,26 @@ function toDto(p: PaymentProvider): PaymentProviderDto {
 export class PaymentProviderService {
   private seeded = false;
 
-  /** Seed default providers if table is empty */
+  /**
+   * Seed default providers.
+   *
+   * Idempotent per-provider: for every entry in `DEFAULT_PROVIDERS` we insert
+   * the row if it's missing and leave existing rows alone. This is what makes
+   * new providers (like `wata` after an upgrade) appear on an already-seeded
+   * installation.
+   */
   private async seed(): Promise<void> {
     if (this.seeded) return;
 
-    const count = await PaymentProvider.count();
-    if (count === 0) {
-      for (const def of DEFAULT_PROVIDERS) {
-        await PaymentProvider.create({
-          ...def,
-          commissionRule: { mode: 'seller' },
-        });
-      }
+    const existing = await PaymentProvider.findAll({ attributes: ['providerId'] });
+    const existingIds = new Set(existing.map((p) => p.providerId));
+
+    for (const def of DEFAULT_PROVIDERS) {
+      if (existingIds.has(def.providerId)) continue;
+      await PaymentProvider.create({
+        ...def,
+        commissionRule: { mode: 'seller' },
+      });
     }
 
     this.seeded = true;
