@@ -8,13 +8,6 @@ import {
 import { Optional } from 'sequelize';
 import { BaseModel } from './base.model';
 
-export interface PaymentMethodData {
-  id: string;
-  name: string;
-  commission: number;
-  enabled: boolean;
-}
-
 export interface CommissionRuleData {
   mode: 'seller' | 'buyer' | 'split';
   customPercent?: number;
@@ -29,7 +22,14 @@ interface PaymentProviderAttributes {
   enabled: boolean;
   testMode: boolean;
   credentials: Record<string, string>;
-  methods: PaymentMethodData[];
+  /**
+   * Default commission percent charged by the provider.
+   *
+   * Applied up-front to build an estimate at checkout time. The actual final
+   * commission is overwritten from webhook data when the provider reports
+   * real fees (YooKassa's `income_amount`, Heleket's `commission`, …).
+   */
+  commissionPercent: number;
   commissionRule: CommissionRuleData;
   supportedCurrencies: string[];
   createdAt: Date;
@@ -38,7 +38,7 @@ interface PaymentProviderAttributes {
 
 type PaymentProviderCreationAttributes = Optional<
   PaymentProviderAttributes,
-  'id' | 'enabled' | 'testMode' | 'credentials' | 'methods' | 'commissionRule' | 'createdAt' | 'updatedAt'
+  'id' | 'enabled' | 'testMode' | 'credentials' | 'commissionPercent' | 'commissionRule' | 'createdAt' | 'updatedAt'
 >;
 
 @Table({ tableName: 'payment_providers' })
@@ -73,9 +73,13 @@ export class PaymentProvider extends BaseModel<PaymentProviderAttributes, Paymen
   @Column(DataType.JSONB)
   declare credentials: Record<string, string>;
 
-  @Default([])
-  @Column(DataType.JSONB)
-  declare methods: PaymentMethodData[];
+  /**
+   * Default commission percent (0–100). Used as the up-front estimate when
+   * creating a payment; overwritten by real values from webhook data.
+   */
+  @Default(0)
+  @Column(DataType.DECIMAL(5, 2))
+  declare commissionPercent: number;
 
   @Default({ mode: 'seller' })
   @Column(DataType.JSONB)

@@ -35,7 +35,7 @@ const paymentProviderRoutes: FastifyPluginAsync = async (fastify): Promise<void>
           enabled: { type: 'boolean' as const },
           testMode: { type: 'boolean' as const },
           credentials: { type: 'object' as const },
-          methods: { type: 'array' as const },
+          commissionPercent: { type: 'number' as const, minimum: 0, maximum: 100 },
           commissionRule: { type: 'object' as const },
         },
       },

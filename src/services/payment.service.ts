@@ -151,9 +151,9 @@ export class PaymentService {
           : provider.supportedCurrencies[0];
       }
 
-      // Find method commission from provider's methods array
-      const method = provider.methods.find((m) => m.id === option.methodId);
-      commissionPercent = method?.commission ?? 0;
+      // Commission is a per-provider default — actual fees from webhook data
+      // overwrite this later.
+      commissionPercent = Number(provider.commissionPercent) || 0;
       commissionAmount = Math.round(productPrice * commissionPercent) / 100;
 
       const rule = provider.commissionRule;
@@ -214,7 +214,7 @@ export class PaymentService {
 
     // 9. Create external payment via provider gateway
     if (provider && provider.enabled) {
-      await this.createExternalPayment(payment, provider, option.methodId, product.name);
+      await this.createExternalPayment(payment, provider, product.name);
     }
 
     const result = await Payment.findByPk(payment.id, {
@@ -225,24 +225,14 @@ export class PaymentService {
   }
 
   /**
-   * Map YooKassa method IDs to API payment_method_data types
-   */
-  private static readonly YOOKASSA_METHOD_MAP: Record<string, string> = {
-    bank_card: 'bank_card',
-    sbp: 'sbp',
-    yoo_money: 'yoo_money',
-    sber_pay: 'sberbank',
-    t_pay: 'tinkoff_bank',
-    qiwi: 'qiwi',
-  };
-
-  /**
-   * Create external payment via provider gateway (YooKassa, etc.)
+   * Create external payment via provider gateway (YooKassa, etc.).
+   *
+   * We don't force a specific payment method on any provider — the buyer picks
+   * the actual method (card / SBP / crypto / …) on the provider's own checkout.
    */
   private async createExternalPayment(
     payment: Payment,
     provider: InstanceType<typeof PaymentProvider>,
-    methodId: string,
     productName: string,
   ): Promise<void> {
     if (provider.providerId === 'yookassa') {
@@ -262,7 +252,6 @@ export class PaymentService {
         currency: payment.currency,
         description: `${productName} — FreshDonate`,
         returnUrl: `${returnUrl}?paymentId=${payment.id}`,
-        paymentMethodType: PaymentService.YOOKASSA_METHOD_MAP[methodId],
         metadata: {
           payment_id: payment.id,
           customer_id: payment.customerId,
@@ -330,7 +319,7 @@ export class PaymentService {
         externalPaymentUrl: wataLink.url,
         meta: {
           ...payment.meta,
-          wata: { testMode: provider.testMode, methodId },
+          wata: { testMode: provider.testMode },
         },
       });
     }

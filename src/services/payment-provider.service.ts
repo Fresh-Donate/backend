@@ -1,4 +1,4 @@
-import { PaymentProvider, type PaymentMethodData, type CommissionRuleData } from '@/models/payment-provider.model';
+import { PaymentProvider, type CommissionRuleData } from '@/models/payment-provider.model';
 import { NotFoundError } from '@/core';
 
 export interface PaymentProviderDto {
@@ -10,7 +10,7 @@ export interface PaymentProviderDto {
   enabled: boolean;
   testMode: boolean;
   credentials: Record<string, string>;
-  methods: PaymentMethodData[];
+  commissionPercent: number;
   commissionRule: CommissionRuleData;
   supportedCurrencies: string[];
 }
@@ -19,7 +19,7 @@ export interface UpdatePaymentProviderDto {
   enabled?: boolean;
   testMode?: boolean;
   credentials?: Record<string, string>;
-  methods?: PaymentMethodData[];
+  commissionPercent?: number;
   commissionRule?: CommissionRuleData;
 }
 
@@ -30,7 +30,7 @@ const DEFAULT_PROVIDERS: Array<{
   description: string;
   icon: string;
   credentials: Record<string, string>;
-  methods: PaymentMethodData[];
+  commissionPercent: number;
   supportedCurrencies: string[];
 }> = [
   {
@@ -39,14 +39,8 @@ const DEFAULT_PROVIDERS: Array<{
     description: 'Приём платежей для РФ: банковские карты, СБП, ЮMoney, SberPay, T-Pay',
     icon: 'i-lucide-credit-card',
     credentials: { shopId: '', secretKey: '' },
-    methods: [
-      { id: 'bank_card', name: 'Банковские карты', commission: 2.8, enabled: true },
-      { id: 'sbp', name: 'СБП', commission: 0.4, enabled: true },
-      { id: 'yoo_money', name: 'ЮMoney', commission: 3.0, enabled: true },
-      { id: 'sber_pay', name: 'SberPay', commission: 2.8, enabled: false },
-      { id: 't_pay', name: 'T-Pay', commission: 2.8, enabled: false },
-      { id: 'qiwi', name: 'QIWI', commission: 6.0, enabled: false },
-    ],
+    // Typical bank-card tariff; edit to match your actual YooKassa contract.
+    commissionPercent: 2.8,
     supportedCurrencies: ['RUB'],
   },
   {
@@ -55,14 +49,7 @@ const DEFAULT_PROVIDERS: Array<{
     description: 'Криптовалютные платежи: BTC, ETH, USDT и другие',
     icon: 'i-lucide-bitcoin',
     credentials: { apiKey: '', merchantId: '' },
-    methods: [
-      { id: 'btc', name: 'Bitcoin (BTC)', commission: 0.5, enabled: true },
-      { id: 'eth', name: 'Ethereum (ETH)', commission: 0.5, enabled: true },
-      { id: 'usdt_trc20', name: 'USDT (TRC-20)', commission: 0.5, enabled: true },
-      { id: 'usdt_erc20', name: 'USDT (ERC-20)', commission: 0.5, enabled: false },
-      { id: 'ltc', name: 'Litecoin (LTC)', commission: 0.5, enabled: false },
-      { id: 'trx', name: 'TRON (TRX)', commission: 0.5, enabled: false },
-    ],
+    commissionPercent: 0.5,
     supportedCurrencies: ['USD', 'EUR', 'RUB'],
   },
   {
@@ -71,10 +58,7 @@ const DEFAULT_PROVIDERS: Array<{
     description: 'Приём платежей: банковские карты, СБП. Поддерживает песочницу.',
     icon: 'i-lucide-wallet',
     credentials: { apiKey: '' },
-    methods: [
-      { id: 'bank_card', name: 'Банковские карты', commission: 2.5, enabled: true },
-      { id: 'sbp', name: 'СБП', commission: 0.7, enabled: true },
-    ],
+    commissionPercent: 2.5,
     supportedCurrencies: ['RUB', 'USD', 'EUR'],
   },
 ];
@@ -89,7 +73,7 @@ function toDto(p: PaymentProvider): PaymentProviderDto {
     enabled: p.enabled,
     testMode: p.testMode,
     credentials: p.credentials,
-    methods: p.methods,
+    commissionPercent: Number(p.commissionPercent),
     commissionRule: p.commissionRule,
     supportedCurrencies: p.supportedCurrencies,
   };
