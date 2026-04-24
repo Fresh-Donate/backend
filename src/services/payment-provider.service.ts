@@ -8,6 +8,7 @@ export interface PaymentProviderDto {
   description: string;
   icon: string;
   enabled: boolean;
+  testMode: boolean;
   credentials: Record<string, string>;
   methods: PaymentMethodData[];
   commissionRule: CommissionRuleData;
@@ -16,6 +17,7 @@ export interface PaymentProviderDto {
 
 export interface UpdatePaymentProviderDto {
   enabled?: boolean;
+  testMode?: boolean;
   credentials?: Record<string, string>;
   methods?: PaymentMethodData[];
   commissionRule?: CommissionRuleData;
@@ -63,6 +65,18 @@ const DEFAULT_PROVIDERS: Array<{
     ],
     supportedCurrencies: ['USD', 'EUR', 'RUB'],
   },
+  {
+    providerId: 'wata',
+    name: 'Wata',
+    description: 'Приём платежей: банковские карты, СБП. Поддерживает песочницу.',
+    icon: 'i-lucide-wallet',
+    credentials: { apiKey: '' },
+    methods: [
+      { id: 'bank_card', name: 'Банковские карты', commission: 2.5, enabled: true },
+      { id: 'sbp', name: 'СБП', commission: 0.7, enabled: true },
+    ],
+    supportedCurrencies: ['RUB', 'USD', 'EUR'],
+  },
 ];
 
 function toDto(p: PaymentProvider): PaymentProviderDto {
@@ -73,6 +87,7 @@ function toDto(p: PaymentProvider): PaymentProviderDto {
     description: p.description,
     icon: p.icon,
     enabled: p.enabled,
+    testMode: p.testMode,
     credentials: p.credentials,
     methods: p.methods,
     commissionRule: p.commissionRule,

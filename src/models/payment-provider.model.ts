@@ -27,6 +27,7 @@ interface PaymentProviderAttributes {
   description: string;
   icon: string;
   enabled: boolean;
+  testMode: boolean;
   credentials: Record<string, string>;
   methods: PaymentMethodData[];
   commissionRule: CommissionRuleData;
@@ -37,7 +38,7 @@ interface PaymentProviderAttributes {
 
 type PaymentProviderCreationAttributes = Optional<
   PaymentProviderAttributes,
-  'id' | 'enabled' | 'credentials' | 'methods' | 'commissionRule' | 'createdAt' | 'updatedAt'
+  'id' | 'enabled' | 'testMode' | 'credentials' | 'methods' | 'commissionRule' | 'createdAt' | 'updatedAt'
 >;
 
 @Table({ tableName: 'payment_providers' })
@@ -58,6 +59,15 @@ export class PaymentProvider extends BaseModel<PaymentProviderAttributes, Paymen
   @Default(false)
   @Column(DataType.BOOLEAN)
   declare enabled: boolean;
+
+  /**
+   * When true, the provider talks to its sandbox / test environment.
+   * Not all providers support a sandbox — gateways that ignore this flag
+   * will simply behave as in production.
+   */
+  @Default(false)
+  @Column(DataType.BOOLEAN)
+  declare testMode: boolean;
 
   @Default({})
   @Column(DataType.JSONB)

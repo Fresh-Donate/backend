@@ -10,6 +10,7 @@ import { NotFoundError, ValidationError, PaymentError } from '@/core';
 import { Op, fn, col, literal } from 'sequelize';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
+import { WataGateway, type WataWebhookPayload } from '@/gateways/wata.gateway';
 import { config } from '@/config';
 
 export interface PaymentDto {
@@ -301,6 +302,37 @@ export class PaymentService {
         externalPaymentId: heleketPayment.uuid,
         externalPaymentUrl: heleketPayment.url,
       });
+    } else if (provider.providerId === 'wata') {
+      const { apiKey } = provider.credentials;
+      if (!apiKey) {
+        throw new PaymentError(
+          'Wata credentials not configured. Set apiKey in payment provider settings.',
+          'WATA_NOT_CONFIGURED',
+        );
+      }
+
+      const currency = payment.currency as 'RUB' | 'USD' | 'EUR';
+      const gateway = new WataGateway(apiKey, provider.testMode);
+      const returnUrl = config.payment.returnUrl;
+
+      const wataLink = await gateway.createPaymentLink({
+        amount: Number(payment.totalAmount),
+        currency,
+        orderId: payment.id,
+        description: `${productName} — FreshDonate`,
+        successRedirectUrl: `${returnUrl}?paymentId=${payment.id}`,
+        failRedirectUrl: `${returnUrl}?paymentId=${payment.id}&failed=1`,
+      });
+
+      await payment.update({
+        providerId: provider.providerId,
+        externalPaymentId: wataLink.id,
+        externalPaymentUrl: wataLink.url,
+        meta: {
+          ...payment.meta,
+          wata: { testMode: provider.testMode, methodId },
+        },
+      });
     }
   }
 
@@ -469,6 +501,96 @@ export class PaymentService {
       paymentCache.delete(cacheKey);
 
       console.log(`Heleket: payment ${payment.id} failed with status ${status} (uuid: ${payload.uuid})`);
+    }
+  }
+
+  /**
+   * Handle Wata webhook notification.
+   * Wata posts the full transaction payload; we care about `Paid` / `Declined`
+   * in the `transactionStatus` field (pre-payment webhooks without that field
+   * are acknowledged and ignored).
+   */
+  async handleWataWebhook(payload: WataWebhookPayload): Promise<void> {
+    // Wata puts our internal payment id into `orderId`; fall back to the
+    // Wata ids (paymentLinkId / transactionId) if it's missing.
+    const status = payload.transactionStatus || payload.status;
+    if (!status) {
+      // Pre-payment notification — nothing to process
+      return;
+    }
+
+    let payment: Payment | null = null;
+
+    if (payload.orderId) {
+      payment = await Payment.findByPk(payload.orderId, {
+        include: [{ model: Customer, required: false }],
+      });
+    }
+
+    if (!payment) {
+      const externalIds = [payload.transactionId, payload.paymentLinkId].filter(Boolean) as string[];
+      if (externalIds.length > 0) {
+        payment = await Payment.findOne({
+          where: { externalPaymentId: { [Op.in]: externalIds } },
+          include: [{ model: Customer, required: false }],
+        });
+      }
+    }
+
+    if (!payment) {
+      console.warn(
+        `Wata webhook: payment not found (orderId=${payload.orderId} tx=${payload.transactionId} link=${payload.paymentLinkId})`,
+      );
+      return;
+    }
+
+    if (status === 'Paid' && payment.status === 'pending') {
+      const paidAmount = payload.amount !== undefined ? Number(payload.amount) : Number(payment.totalAmount);
+
+      await payment.update({
+        status: 'paid',
+        paidAt: payload.paymentTime ? new Date(payload.paymentTime) : new Date(),
+        totalAmount: paidAmount,
+        currency: payload.currency || payment.currency,
+        // Wata webhooks don't carry commission — keep the estimate we already stored.
+        externalPaymentId: payload.transactionId || payment.externalPaymentId,
+        meta: {
+          ...payment.meta,
+          wata: {
+            ...(payment.meta.wata || {}),
+            transactionId: payload.transactionId,
+            paymentLinkId: payload.paymentLinkId,
+          },
+        },
+      });
+
+      // Attempt delivery
+      await this.deliveryService.attemptDelivery(payment.id);
+
+      // Clear cache
+      const cacheKey = getCacheKey(payment.customerId, payment.productId);
+      paymentCache.delete(cacheKey);
+
+      console.log(`Wata: payment ${payment.id} succeeded (tx: ${payload.transactionId})`);
+    } else if (status === 'Declined' && payment.status === 'pending') {
+      await payment.update({
+        status: 'failed',
+        meta: {
+          ...payment.meta,
+          cancelReason: payload.errorCode || 'declined',
+          wata: {
+            ...(payment.meta.wata || {}),
+            transactionId: payload.transactionId,
+            errorCode: payload.errorCode,
+            errorDescription: payload.errorDescription,
+          },
+        },
+      });
+
+      const cacheKey = getCacheKey(payment.customerId, payment.productId);
+      paymentCache.delete(cacheKey);
+
+      console.log(`Wata: payment ${payment.id} declined (${payload.errorCode || 'unknown'})`);
     }
   }
 

@@ -2,10 +2,34 @@ import { type FastifyPluginAsync } from 'fastify';
 import { PaymentService } from '@/services/payment.service';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
+import { WataGateway } from '@/gateways/wata.gateway';
 import { PaymentProvider } from '@/models/payment-provider.model';
 
 const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const paymentService = new PaymentService();
+
+  // Inside this plugin scope, replace the default JSON body parser with one
+  // that ALSO preserves the raw bytes on `request.rawBody`. This is only
+  // needed for gateways (like Wata) that sign the raw request body, and
+  // the encapsulated scope means we don't touch other plugins' parsing.
+  fastify.removeContentTypeParser('application/json');
+  fastify.addContentTypeParser(
+    'application/json',
+    { parseAs: 'buffer' },
+    (req, body, done) => {
+      const buf = body as Buffer;
+      (req as any).rawBody = buf;
+      if (buf.length === 0) {
+        done(null, {});
+        return;
+      }
+      try {
+        done(null, JSON.parse(buf.toString('utf8')));
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
 
   /**
    * POST /webhooks/yookassa — YooKassa payment notification
@@ -110,6 +134,62 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       await paymentService.handleHeleketWebhook(payload);
     } catch (error: any) {
       request.log.error(`Heleket webhook processing error: ${error.message}`);
+    }
+
+    return reply.code(200).send({ status: 'ok' });
+  });
+
+  /**
+   * POST /webhooks/wata — Wata payment notification
+   * @see https://wata.pro/api
+   *
+   * Wata signs the raw request body with RSA-SHA512 and ships the base64
+   * signature in the `X-Signature` header. The public key is fetched from
+   * the same environment (prod or sandbox) that created the payment link,
+   * selected by the provider's `testMode` flag.
+   */
+  fastify.post<{ Body: Record<string, any> }>('/wata', {
+    config: { rateLimit: { max: 200, timeWindow: 60000 } },
+  }, async (request, reply) => {
+    const provider = await PaymentProvider.findOne({ where: { providerId: 'wata' } });
+    if (!provider) {
+      request.log.error('Wata webhook: provider not found in database');
+      return reply.code(200).send({ status: 'ok' });
+    }
+
+    const { apiKey } = provider.credentials;
+    const rawBody: Buffer | undefined = (request as any).rawBody;
+    const signature = request.headers['x-signature'] as string | undefined;
+
+    const skipSig = process.env.NODE_ENV === 'development'
+      || process.env.WATA_SKIP_SIGNATURE_CHECK === 'true';
+
+    if (!skipSig) {
+      if (!apiKey) {
+        request.log.warn('Wata webhook rejected: apiKey not configured, cannot verify signature');
+        return reply.code(403).send({ error: 'Not configured' });
+      }
+      if (!rawBody) {
+        request.log.warn('Wata webhook rejected: raw body unavailable');
+        return reply.code(400).send({ error: 'Bad request' });
+      }
+      const gateway = new WataGateway(apiKey, provider.testMode);
+      const ok = await gateway.verifyWebhookSignature(rawBody, signature);
+      if (!ok) {
+        request.log.warn('Wata webhook rejected: invalid signature');
+        return reply.code(403).send({ error: 'Invalid signature' });
+      }
+    }
+
+    const payload = request.body || {};
+    request.log.info(
+      `Wata webhook: status=${payload.transactionStatus || payload.status} tx=${payload.transactionId} order=${payload.orderId}`,
+    );
+
+    try {
+      await paymentService.handleWataWebhook(payload);
+    } catch (error: any) {
+      request.log.error(`Wata webhook processing error: ${error.message}`);
     }
 
     return reply.code(200).send({ status: 'ok' });
