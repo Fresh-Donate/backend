@@ -12,6 +12,7 @@ import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway, type WataWebhookPayload } from '@/gateways/wata.gateway';
 import { config } from '@/config';
+import { buildAmountInTargetSql, isSupportedCurrency } from '@/utils/currency';
 
 export interface PaymentDto {
   id: string;
@@ -704,7 +705,13 @@ export class PaymentService {
     };
   }
 
-  /** Revenue chart data grouped by period, optionally filtered by currency */
+  /**
+   * Revenue chart grouped by period. All payments in the date range
+   * contribute regardless of their original currency — each row's amount is
+   * converted in SQL into the requested `currency` (or, if none is given,
+   * the admin's configured base currency). Unsupported codes also fall back
+   * to base, so a stale frontend can't break the chart.
+   */
   async getRevenueChart(options: {
     from: string;
     to: string;
@@ -713,30 +720,38 @@ export class PaymentService {
   }): Promise<{ date: string; amount: number; count: number }[]> {
     const { from, to, period, currency } = options;
 
+    const settings = await this.settingsService.get();
+    const requested = currency?.toUpperCase();
+    const target =
+      requested && isSupportedCurrency(requested) ? requested : settings.base_currency;
+
     const truncFn = period === 'monthly'
       ? "date_trunc('month', paid_at)"
       : period === 'weekly'
         ? "date_trunc('week', paid_at)"
         : "date_trunc('day', paid_at)";
 
-    const where: any = {
-      status: { [Op.in]: ['paid', 'delivered'] },
-      paidAt: {
-        [Op.gte]: new Date(from),
-        [Op.lte]: new Date(to),
-      },
-    };
-    if (currency) {
-      where.currency = currency;
-    }
+    const amountInTarget = buildAmountInTargetSql(
+      settings.currency_rates,
+      settings.base_currency,
+      target,
+      'total_amount',
+      'currency',
+    );
 
     const results = await Payment.findAll({
       attributes: [
         [literal(truncFn), 'date'],
-        [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'amount'],
+        [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
         [fn('COUNT', col('id')), 'count'],
       ],
-      where,
+      where: {
+        status: { [Op.in]: ['paid', 'delivered'] },
+        paidAt: {
+          [Op.gte]: new Date(from),
+          [Op.lte]: new Date(to),
+        },
+      },
       group: [literal(truncFn)] as any,
       order: [[literal(truncFn), 'ASC']] as any,
       raw: true,

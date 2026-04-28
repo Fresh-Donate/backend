@@ -80,16 +80,56 @@ export function buildAmountInBaseSql(
   amountColumn = 'total_amount',
   currencyColumn = 'currency',
 ): string {
+  return buildAmountInTargetSql(rates, base, base, amountColumn, currencyColumn);
+}
+
+/**
+ * Build a SQL `CASE` expression that converts a `total_amount` column into
+ * an arbitrary `target` currency, going through `base` as the pivot. Falls
+ * out to the same shape as `buildAmountInBaseSql` when `target === base`.
+ *
+ * The conversion factor for a row in currency C is
+ * `rate_C_to_base / rate_target_to_base`, where `rate_X_to_base` is `1` for
+ * X = base and `rates[X]` otherwise. Pre-computed here as a literal so the
+ * DB doesn't have to reach into JSONB per row.
+ *
+ * Codes are alphanumeric-whitelisted (defence against corrupted JSONB
+ * sneaking a string into SQL) and rates coerced via `Number()`.
+ */
+export function buildAmountInTargetSql(
+  rates: CurrencyRates,
+  base: string,
+  target: string,
+  amountColumn = 'total_amount',
+  currencyColumn = 'currency',
+): string {
+  const denom = target === base ? 1 : Number(rates?.[target]);
+  // Without a usable target rate we can't produce meaningful conversion
+  // factors. Pass amounts through untouched — visibly wrong in the UI is
+  // better than silently zeroing rows out.
+  if (!Number.isFinite(denom) || denom <= 0) return amountColumn;
+
+  const codeRe = /^[A-Z0-9]{1,8}$/i;
   const branches: string[] = [];
+
+  if (target !== base && codeRe.test(base)) {
+    // Base rows: factor = 1 / rate_target_to_base.
+    branches.push(`WHEN '${base}' THEN ${amountColumn} / ${denom}`);
+  }
+
   for (const [code, rate] of Object.entries(rates ?? {})) {
+    if (code === base) continue;
+    if (!codeRe.test(code)) continue;
     const numeric = Number(rate);
     if (!Number.isFinite(numeric) || numeric <= 0) continue;
-    if (code === base) continue;
-    // `code` is whitelisted to alphanumerics to keep SQL injection-proof
-    // even though it comes from a JSONB key the admin controls.
-    if (!/^[A-Z0-9]{1,8}$/i.test(code)) continue;
-    branches.push(`WHEN '${code}' THEN ${amountColumn} * ${numeric}`);
+    if (code === target) {
+      // Same currency — factor 1, written explicitly so the CASE is exhaustive.
+      branches.push(`WHEN '${code}' THEN ${amountColumn}`);
+    } else {
+      branches.push(`WHEN '${code}' THEN ${amountColumn} * ${numeric / denom}`);
+    }
   }
+
   if (branches.length === 0) return amountColumn;
   return `CASE ${currencyColumn} ${branches.join(' ')} ELSE ${amountColumn} END`;
 }
