@@ -126,8 +126,13 @@ export class CustomerService {
         ['created_at', 'DESC'],
       ];
     } else if (sortBy === 'totalSpent') {
-      const rates = (await this.settingsService.get()).currency_rates;
-      const amountInBase = buildAmountInBaseSql(rates, 'payments.total_amount', 'payments.currency');
+      const settings = await this.settingsService.get();
+      const amountInBase = buildAmountInBaseSql(
+        settings.currency_rates,
+        settings.base_currency,
+        'payments.total_amount',
+        'payments.currency',
+      );
       order = [
         [
           literal(

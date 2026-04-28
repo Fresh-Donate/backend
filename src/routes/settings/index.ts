@@ -16,6 +16,7 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       delivery_method?: string;
       rcon_config?: { host?: string; port?: number; password?: string };
       plugin_config?: { token?: string };
+      base_currency?: 'RUB' | 'USD' | 'EUR';
       currency_rates?: Record<string, number>;
     };
   }>('/', {
@@ -40,9 +41,13 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
               token: { type: 'string' as const, maxLength: 64 },
             },
           },
-          // Map of "currency code → how many RUB in 1 unit". Codes and rates
-          // are sanity-checked in the service (rejects RUB as a key, drops
-          // non-positive or non-numeric values, restricts code shape).
+          // Closed allow-list — switching the base resets the rate map to
+          // defaults for the new base, so stale "X per old base" values
+          // can't survive the change.
+          base_currency: { type: 'string' as const, enum: ['RUB', 'USD', 'EUR'] },
+          // Map of "currency code → how many of base_currency in 1 unit".
+          // The service drops codes outside the allow-list, the base itself,
+          // and non-positive values.
           currency_rates: {
             type: 'object' as const,
             additionalProperties: { type: 'number' as const, minimum: 0, maximum: 100000 },
