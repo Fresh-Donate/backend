@@ -11,14 +11,7 @@ const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> =>
 
   // PUT /shop-settings — admin only
   fastify.put<{
-    Body: {
-      name?: string;
-      description?: string;
-      color?: string;
-      ip?: string;
-      shopUrl?: string;
-      currencyRates?: Record<string, number>;
-    };
+    Body: { name?: string; description?: string; color?: string; ip?: string; shopUrl?: string };
   }>('/', {
     onRequest: [fastify.authenticate],
     schema: {
@@ -31,19 +24,12 @@ const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> =>
           ip: { type: 'string', minLength: 1, maxLength: 64 },
           // Validated as URI; trailing slashes are stripped by the service.
           shopUrl: { type: 'string', format: 'uri', maxLength: 256 },
-          // Map of "currency code → how many RUB in 1 unit". Codes and rates
-          // are sanity-checked in the service (rejects RUB as a key, drops
-          // non-positive or non-numeric values).
-          currencyRates: {
-            type: 'object',
-            additionalProperties: { type: 'number', minimum: 0, maximum: 100000 },
-          },
         },
       },
     },
   }, async (request) => {
-    const { name, description, color, ip, shopUrl, currencyRates } = request.body;
-    return service.update({ name, description, color, ip, shopUrl, currencyRates });
+    const { name, description, color, ip, shopUrl } = request.body;
+    return service.update({ name, description, color, ip, shopUrl });
   });
 };
 

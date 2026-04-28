@@ -1,7 +1,7 @@
 import { Customer } from '@/models/customer.model';
 import { Payment } from '@/models/payment.model';
 import { Op, fn, col, literal } from 'sequelize';
-import { ShopSettingsService } from './shop-settings.service';
+import { SettingsService } from './settings.service';
 import { buildAmountInBaseSql } from '@/utils/currency';
 
 export interface CustomerCurrencyStats {
@@ -70,7 +70,7 @@ async function aggregateStatsForCustomers(customerIds: string[]): Promise<Map<st
 }
 
 export class CustomerService {
-  private settingsService = new ShopSettingsService();
+  private settingsService = new SettingsService();
 
   async findOrCreate(nickname: string, email: string): Promise<CustomerDto> {
     let customer = await Customer.findOne({
@@ -126,7 +126,7 @@ export class CustomerService {
         ['created_at', 'DESC'],
       ];
     } else if (sortBy === 'totalSpent') {
-      const rates = (await this.settingsService.get()).currencyRates;
+      const rates = (await this.settingsService.get()).currency_rates;
       const amountInBase = buildAmountInBaseSql(rates, 'payments.total_amount', 'payments.currency');
       order = [
         [

@@ -16,6 +16,7 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       delivery_method?: string;
       rcon_config?: { host?: string; port?: number; password?: string };
       plugin_config?: { token?: string };
+      currency_rates?: Record<string, number>;
     };
   }>('/', {
     onRequest: [fastify.authenticate],
@@ -38,6 +39,13 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
             properties: {
               token: { type: 'string' as const, maxLength: 64 },
             },
+          },
+          // Map of "currency code → how many RUB in 1 unit". Codes and rates
+          // are sanity-checked in the service (rejects RUB as a key, drops
+          // non-positive or non-numeric values, restricts code shape).
+          currency_rates: {
+            type: 'object' as const,
+            additionalProperties: { type: 'number' as const, minimum: 0, maximum: 100000 },
           },
         },
       },

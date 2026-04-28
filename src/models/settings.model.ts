@@ -6,6 +6,7 @@ import {
 } from 'sequelize-typescript';
 import { Optional } from 'sequelize';
 import { BaseModel } from './base.model';
+import type { CurrencyRates } from '@/utils/currency';
 
 export type DeliveryMethod = 'rcon' | 'plugin';
 
@@ -25,13 +26,14 @@ interface SettingsAttributes {
   delivery_method: DeliveryMethod;
   rcon_config: RconConfig;
   plugin_config: PluginConfig;
+  currency_rates: CurrencyRates;
   createdAt: Date;
   updatedAt: Date;
 }
 
 type SettingsCreationAttributes = Optional<
   SettingsAttributes,
-  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'createdAt' | 'updatedAt'
+  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'currency_rates' | 'createdAt' | 'updatedAt'
 >;
 
 @Table({ tableName: 'settings' })
@@ -51,4 +53,8 @@ export class Settings extends BaseModel<SettingsAttributes, SettingsCreationAttr
   @Default({ token: '' })
   @Column(DataType.JSONB)
   declare plugin_config: PluginConfig;
+
+  @Default({ USD: 95, EUR: 100 })
+  @Column(DataType.JSONB)
+  declare currency_rates: CurrencyRates;
 }

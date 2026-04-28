@@ -1,4 +1,16 @@
-import { CurrencyRates } from '@/models/shop-settings.model';
+/**
+ * Currency conversion rates relative to RUB — the platform's base currency.
+ *
+ * Each entry is "how many RUB in 1 unit of the given currency", e.g.
+ * `{ USD: 95.5, EUR: 102.3 }` means 1 USD = 95.5 RUB and 1 EUR = 102.3 RUB.
+ * RUB itself is always 1 and is intentionally not stored here.
+ *
+ * Used wherever amounts in mixed currencies need to be compared or summed
+ * (sorting customers by total spent, dashboard totals, etc.). Lives in the
+ * shared `Settings` (admin / panel-wide) — not `ShopSettings`, which is
+ * customer-facing presentation.
+ */
+export type CurrencyRates = Record<string, number>;
 
 /**
  * RUB is the platform's anchor currency. Every rate is "how many RUB in 1 X",
