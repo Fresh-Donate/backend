@@ -5,6 +5,21 @@ export interface ShopSettingsDto {
   description: string;
   color: string;
   ip: string;
+  shopUrl: string;
+}
+
+const DEFAULTS = {
+  name: 'FreshDonate Shop',
+  description: '',
+  color: 'sky',
+  ip: 'play.example.com',
+  shopUrl: 'http://localhost:3002',
+};
+
+/** Strip trailing slashes from a URL — keeps canonical URLs consistent. */
+function normalizeShopUrl(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  return url.replace(/\/+$/, '');
 }
 
 export class ShopSettingsService {
@@ -14,12 +29,7 @@ export class ShopSettingsService {
   async get(): Promise<ShopSettingsDto> {
     const [settings] = await ShopSettings.findOrCreate({
       where: {},
-      defaults: {
-        name: 'FreshDonate Shop',
-        description: '',
-        color: 'sky',
-        ip: 'play.example.com',
-      },
+      defaults: DEFAULTS,
     });
 
     return {
@@ -27,6 +37,7 @@ export class ShopSettingsService {
       description: settings.description,
       color: settings.color,
       ip: settings.ip,
+      shopUrl: settings.shopUrl,
     };
   }
 
@@ -36,21 +47,22 @@ export class ShopSettingsService {
   async update(data: Partial<ShopSettingsDto>): Promise<ShopSettingsDto> {
     const [settings] = await ShopSettings.findOrCreate({
       where: {},
-      defaults: {
-        name: 'FreshDonate Shop',
-        description: '',
-        color: 'sky',
-        ip: 'play.example.com',
-      },
+      defaults: DEFAULTS,
     });
 
-    await settings.update(data);
+    const patch = {
+      ...data,
+      shopUrl: normalizeShopUrl(data.shopUrl),
+    };
+
+    await settings.update(patch);
 
     return {
       name: settings.name,
       description: settings.description,
       color: settings.color,
       ip: settings.ip,
+      shopUrl: settings.shopUrl,
     };
   }
 }
