@@ -8,15 +8,34 @@ const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
   // GET /customers — admin only
   fastify.get<{
-    Querystring: { search?: string; limit?: string; offset?: string };
+    Querystring: {
+      search?: string;
+      limit?: string;
+      offset?: string;
+      sortBy?: string;
+      sortOrder?: string;
+    };
   }>('/', {
     onRequest: [fastify.authenticate],
   }, async (request) => {
-    const { search, limit, offset } = request.query;
+    const { search, limit, offset, sortBy, sortOrder } = request.query;
+
+    // Whitelist sort params — protects against arbitrary SQL identifiers
+    // sneaking into the ORDER clause via the literal() branch.
+    const allowedSortBy = ['nickname', 'email', 'createdAt', 'purchaseCount'] as const;
+    type SortBy = typeof allowedSortBy[number];
+    const validSortBy: SortBy | undefined = (allowedSortBy as readonly string[]).includes(sortBy ?? '')
+      ? (sortBy as SortBy)
+      : undefined;
+    const validSortOrder: 'asc' | 'desc' | undefined =
+      sortOrder === 'asc' || sortOrder === 'desc' ? sortOrder : undefined;
+
     return customerService.findAll({
       search,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
+      sortBy: validSortBy,
+      sortOrder: validSortOrder,
     });
   });
 

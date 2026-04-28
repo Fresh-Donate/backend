@@ -85,7 +85,13 @@ export class CustomerService {
     return toDto(customer, statsMap.get(customer.id) ?? []);
   }
 
-  async findAll(options?: { search?: string; limit?: number; offset?: number }): Promise<{ items: CustomerDto[]; total: number }> {
+  async findAll(options?: {
+    search?: string;
+    limit?: number;
+    offset?: number;
+    sortBy?: 'nickname' | 'email' | 'createdAt' | 'purchaseCount';
+    sortOrder?: 'asc' | 'desc';
+  }): Promise<{ items: CustomerDto[]; total: number }> {
     const where: any = {};
     if (options?.search) {
       where[Op.or] = [
@@ -94,9 +100,34 @@ export class CustomerService {
       ];
     }
 
+    const sortBy = options?.sortBy ?? 'createdAt';
+    const sortDirection = options?.sortOrder === 'asc' ? 'ASC' : 'DESC';
+
+    // Whitelist-driven ORDER. `purchaseCount` is computed via a correlated
+    // subquery — only successful payments counted, matching aggregateStats.
+    // Other columns map straight to physical Customer columns. Always include
+    // a stable secondary `created_at` so the page boundary doesn't reshuffle.
+    let order: any[];
+    if (sortBy === 'purchaseCount') {
+      order = [
+        [
+          literal(
+            `(SELECT COUNT(*) FROM payments WHERE payments.customer_id = "Customer"."id" AND payments.status IN ('paid', 'delivered'))`,
+          ),
+          sortDirection,
+        ],
+        ['created_at', 'DESC'],
+      ];
+    } else if (sortBy === 'createdAt') {
+      order = [['created_at', sortDirection]];
+    } else {
+      // 'nickname' or 'email' — physical columns on customers.
+      order = [[sortBy, sortDirection], ['created_at', 'DESC']];
+    }
+
     const { rows, count } = await Customer.findAndCountAll({
       where,
-      order: [['created_at', 'DESC']],
+      order,
       limit: options?.limit || 50,
       offset: options?.offset || 0,
     });
