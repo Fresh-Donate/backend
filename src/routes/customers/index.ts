@@ -22,7 +22,7 @@ const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
     // Whitelist sort params — protects against arbitrary SQL identifiers
     // sneaking into the ORDER clause via the literal() branch.
-    const allowedSortBy = ['nickname', 'email', 'createdAt', 'purchaseCount'] as const;
+    const allowedSortBy = ['nickname', 'email', 'createdAt', 'purchaseCount', 'totalSpent'] as const;
     type SortBy = typeof allowedSortBy[number];
     const validSortBy: SortBy | undefined = (allowedSortBy as readonly string[]).includes(sortBy ?? '')
       ? (sortBy as SortBy)

@@ -1,6 +1,8 @@
 import { Customer } from '@/models/customer.model';
 import { Payment } from '@/models/payment.model';
 import { Op, fn, col, literal } from 'sequelize';
+import { ShopSettingsService } from './shop-settings.service';
+import { buildAmountInBaseSql } from '@/utils/currency';
 
 export interface CustomerCurrencyStats {
   currency: string;
@@ -68,6 +70,8 @@ async function aggregateStatsForCustomers(customerIds: string[]): Promise<Map<st
 }
 
 export class CustomerService {
+  private settingsService = new ShopSettingsService();
+
   async findOrCreate(nickname: string, email: string): Promise<CustomerDto> {
     let customer = await Customer.findOne({
       where: { [Op.or]: [{ nickname }, { email }] },
@@ -89,7 +93,7 @@ export class CustomerService {
     search?: string;
     limit?: number;
     offset?: number;
-    sortBy?: 'nickname' | 'email' | 'createdAt' | 'purchaseCount';
+    sortBy?: 'nickname' | 'email' | 'createdAt' | 'purchaseCount' | 'totalSpent';
     sortOrder?: 'asc' | 'desc';
   }): Promise<{ items: CustomerDto[]; total: number }> {
     const where: any = {};
@@ -103,16 +107,31 @@ export class CustomerService {
     const sortBy = options?.sortBy ?? 'createdAt';
     const sortDirection = options?.sortOrder === 'asc' ? 'ASC' : 'DESC';
 
-    // Whitelist-driven ORDER. `purchaseCount` is computed via a correlated
-    // subquery — only successful payments counted, matching aggregateStats.
-    // Other columns map straight to physical Customer columns. Always include
-    // a stable secondary `created_at` so the page boundary doesn't reshuffle.
+    // Whitelist-driven ORDER. Aggregate columns (`purchaseCount`, `totalSpent`)
+    // are computed via correlated subqueries — only successful payments are
+    // counted, matching aggregateStatsForCustomers. `totalSpent` normalises
+    // each payment into RUB on the fly using the admin-configured rates,
+    // making cross-currency sums comparable. Other columns map straight to
+    // physical Customer columns. Always include a stable secondary
+    // `created_at` so the page boundary doesn't reshuffle on equal keys.
     let order: any[];
     if (sortBy === 'purchaseCount') {
       order = [
         [
           literal(
             `(SELECT COUNT(*) FROM payments WHERE payments.customer_id = "Customer"."id" AND payments.status IN ('paid', 'delivered'))`,
+          ),
+          sortDirection,
+        ],
+        ['created_at', 'DESC'],
+      ];
+    } else if (sortBy === 'totalSpent') {
+      const rates = (await this.settingsService.get()).currencyRates;
+      const amountInBase = buildAmountInBaseSql(rates, 'payments.total_amount', 'payments.currency');
+      order = [
+        [
+          literal(
+            `(SELECT COALESCE(SUM(${amountInBase}), 0) FROM payments WHERE payments.customer_id = "Customer"."id" AND payments.status IN ('paid', 'delivered'))`,
           ),
           sortDirection,
         ],
