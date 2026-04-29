@@ -94,9 +94,6 @@ export class PaymentService {
   private deliveryService = new DeliveryService();
 
   async create(data: CreatePaymentDto): Promise<PaymentDto> {
-    // 0. Re-math count
-    const count = Math.ceil(data.count ?? 1);
-
     // 1. Validate product
     const product = await Product.findByPk(data.productId);
     if (!product) {
@@ -104,8 +101,12 @@ export class PaymentService {
     }
 
     // 1.1 Verify product type
+    const count = product.allowCustomCount
+      ? Math.max(1, Math.floor(Number(data.count) || 1))
+      : 1;
+
     if (!product.allowCustomCount && count !== 1) {
-      throw new ValidationError('Product count is not allowed');
+      throw new ValidationError('This product does not support custom count');
     }
 
     // 2. Find or create customer

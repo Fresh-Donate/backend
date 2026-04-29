@@ -61,7 +61,7 @@ export class DeliveryService {
     try {
       const results = await this.rconService.executeCommands(commands, {
         player: payment.customer?.nickname || '',
-        amount: String(product.quantity),
+        amount: String(product.quantity * payment.userSelectedCount),
         product: product.name,
       });
 
