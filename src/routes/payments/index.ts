@@ -23,7 +23,16 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         required: ['productId', 'nickname', 'email', 'paymentOptionId'],
         properties: {
           productId: { type: 'string' as const },
-          nickname: { type: 'string' as const, minLength: 1, maxLength: 64 },
+          // Minecraft Java Edition username rules — 3..16 chars of
+          // [a-zA-Z0-9_]. Mirrored in shop UI Zod schema; keep the two in
+          // sync. Bedrock players with spaces/longer names are rare on
+          // Java-targeted donate shops, so we don't loosen this.
+          nickname: {
+            type: 'string' as const,
+            minLength: 3,
+            maxLength: 16,
+            pattern: '^[a-zA-Z0-9_]+$',
+          },
           email: { type: 'string' as const, format: 'email', maxLength: 256 },
           count: { type: 'number' as const, minimum: 1, maximum: 100000 },
           paymentOptionId: { type: 'string' as const },
