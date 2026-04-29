@@ -24,6 +24,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/package.json ./
 
+RUN mkdir -p /app/uploads
+VOLUME ["/app/uploads"]
+
 EXPOSE 3001
 
 CMD ["node", "node_modules/.bin/fastify", "start", "-l", "info", "-a", "0.0.0.0", "dist/app.js"]

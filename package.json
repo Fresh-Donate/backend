@@ -26,12 +26,14 @@
     "@fastify/autoload": "^6.0.0",
     "@fastify/cors": "^11.2.0",
     "@fastify/jwt": "^10.0.0",
+    "@fastify/multipart": "^9.4.0",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/redis": "^7.2.0",
     "@fastify/sensible": "^6.0.0",
-    "axios": "^1.14.0",
+    "@fastify/static": "9.1.1",
+    "axios": "1.15.0",
     "bcrypt": "^6.0.0",
-    "fastify": "^5.0.0",
+    "fastify": "5.8.5",
     "fastify-cli": "^7.4.1",
     "fastify-plugin": "^5.0.0",
     "ioredis": "^5.10.1",
@@ -42,7 +44,8 @@
     "rcon-client": "^4.2.5",
     "reflect-metadata": "^0.2.2",
     "sequelize": "^6.37.8",
-    "sequelize-typescript": "^2.1.6"
+    "sequelize-typescript": "^2.1.6",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
