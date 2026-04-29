@@ -104,7 +104,7 @@ export class PaymentService {
     }
 
     // 1.1 Verify product type
-    if (product.allowCustomCount && count !== 1) {
+    if (!product.allowCustomCount && count !== 1) {
       throw new ValidationError('Product count is not allowed');
     }
 
