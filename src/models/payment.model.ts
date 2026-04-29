@@ -35,6 +35,7 @@ interface PaymentAttributes {
   meta: Record<string, any>;
   createdAt: Date;
   updatedAt: Date;
+  userSelectedCount: number;
 }
 
 type PaymentCreationAttributes = Optional<
@@ -52,6 +53,7 @@ type PaymentCreationAttributes = Optional<
   | 'paidAt'
   | 'deliveredAt'
   | 'meta'
+  | 'userSelectedCount'
   | 'createdAt'
   | 'updatedAt'
 >;
@@ -124,4 +126,8 @@ export class Payment extends BaseModel<PaymentAttributes, PaymentCreationAttribu
   @Default({})
   @Column(DataType.JSONB)
   declare meta: Record<string, any>;
+
+  @Default(1)
+  @Column(DataType.INTEGER)
+  declare userSelectedCount: number; // if product type is item, else - 1
 }

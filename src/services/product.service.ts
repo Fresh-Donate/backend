@@ -11,6 +11,7 @@ export interface ProductDto {
   type: string;
   commands: string[];
   imageUrl: string;
+  allowCustomCount: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,6 +25,7 @@ export interface CreateProductDto {
   type: string;
   commands?: string[];
   imageUrl?: string;
+  allowCustomCount: boolean;
 }
 
 export interface UpdateProductDto {
@@ -50,6 +52,7 @@ function toDto(p: Product): ProductDto {
     imageUrl: p.imageUrl,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
+    allowCustomCount: p.allowCustomCount,
   };
 }
 
@@ -75,6 +78,7 @@ export class ProductService {
       type: data.type,
       commands: data.commands || [],
       imageUrl: data.imageUrl || '',
+      allowCustomCount: data.allowCustomCount || false,
     });
     return toDto(product);
   }

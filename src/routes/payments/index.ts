@@ -14,6 +14,7 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       nickname: string;
       email: string;
       paymentOptionId: string;
+      count?: number;
     };
   }>('/', {
     schema: {
@@ -24,6 +25,7 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
           productId: { type: 'string' as const },
           nickname: { type: 'string' as const, minLength: 1, maxLength: 64 },
           email: { type: 'string' as const, format: 'email', maxLength: 256 },
+          count: { type: 'number' as const, minimum: 1, maximum: 100000 },
           paymentOptionId: { type: 'string' as const },
         },
       },

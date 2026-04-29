@@ -17,11 +17,12 @@ interface ProductAttributes {
   type: string;
   commands: string[];
   imageUrl: string;
+  allowCustomCount: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
-type ProductCreationAttributes = Optional<ProductAttributes, 'id' | 'description' | 'commands' | 'imageUrl' | 'createdAt' | 'updatedAt'>;
+type ProductCreationAttributes = Optional<ProductAttributes, 'id' | 'description' | 'commands' | 'imageUrl' | 'allowCustomCount' | 'createdAt' | 'updatedAt'>;
 
 @Table({ tableName: 'products' })
 export class Product extends BaseModel<ProductAttributes, ProductCreationAttributes> {
@@ -53,4 +54,8 @@ export class Product extends BaseModel<ProductAttributes, ProductCreationAttribu
   @Default('')
   @Column(DataType.STRING(512))
   declare imageUrl: string;
+
+  @Default(false)
+  @Column(DataType.BOOLEAN)
+  declare allowCustomCount: boolean;
 }

@@ -39,13 +39,14 @@ const productRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       type: string;
       commands?: string[];
       imageUrl?: string;
+      allowCustomCount: boolean;
     };
   }>('/', {
     onRequest: [fastify.authenticate],
     schema: {
       body: {
         ...productBodySchema,
-        required: ['name', 'price', 'currency', 'quantity', 'type'],
+        required: ['name', 'price', 'currency', 'quantity', 'type', 'allowCustomCount'],
       },
     },
   }, async (request, reply) => {

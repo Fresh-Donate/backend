@@ -39,12 +39,14 @@ export interface PaymentDto {
   meta: Record<string, any>;
   createdAt: string;
   updatedAt: string;
+  userSelectedCount: number;
 }
 
 export interface CreatePaymentDto {
   productId: string;
   nickname: string;
   email: string;
+  count?: number;
   paymentOptionId: string;
 }
 
@@ -74,6 +76,7 @@ function toDto(p: Payment): PaymentDto {
     meta: p.meta,
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
+    userSelectedCount: p.userSelectedCount,
   };
 }
 
@@ -91,17 +94,25 @@ export class PaymentService {
   private deliveryService = new DeliveryService();
 
   async create(data: CreatePaymentDto): Promise<PaymentDto> {
+    // 0. Re-math count
+    const count = Math.ceil(data.count ?? 1);
+
     // 1. Validate product
     const product = await Product.findByPk(data.productId);
     if (!product) {
       throw new NotFoundError('Product not found');
     }
 
+    // 1.1 Verify product type
+    if (product.allowCustomCount && count !== 1) {
+      throw new ValidationError('Product count is not allowed');
+    }
+
     // 2. Find or create customer
     const customer = await this.customerService.findOrCreate(data.nickname, data.email);
 
     // 3. Check cache — if a pending payment already exists, return it
-    const cacheKey = getCacheKey(customer.id, data.productId);
+    const cacheKey = getCacheKey(customer.id, `${data.productId}_${count}`);
     const cached = paymentCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       const existing = await Payment.findByPk(cached.paymentId, {
@@ -136,7 +147,7 @@ export class PaymentService {
     }
 
     // 5. Determine payment currency and commission from provider settings
-    const productPrice = Number(product.price);
+    const productPrice = Number(product.price) * count;
     const productCurrency = product.currency;
     let paymentCurrency = productCurrency;
     let commissionPercent = 0;
@@ -186,6 +197,7 @@ export class PaymentService {
       providerAmount,
       paymentOptionId: data.paymentOptionId,
       status: 'pending',
+      userSelectedCount: count,
     });
 
     // 7. Check if demo mode
