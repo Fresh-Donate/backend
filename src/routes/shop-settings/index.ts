@@ -1,5 +1,6 @@
 import { type FastifyPluginAsync } from 'fastify';
 import { ShopSettingsService } from '@/services/shop-settings.service';
+import type { OwnerType } from '@/models/shop-settings.model';
 
 const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new ShopSettingsService();
@@ -11,7 +12,17 @@ const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> =>
 
   // PUT /shop-settings — admin only
   fastify.put<{
-    Body: { name?: string; description?: string; color?: string; ip?: string; shopUrl?: string };
+    Body: {
+      name?: string;
+      description?: string;
+      color?: string;
+      ip?: string;
+      shopUrl?: string;
+      ownerName?: string;
+      ownerType?: OwnerType;
+      ownerInn?: string;
+      contactEmail?: string;
+    };
   }>('/', {
     onRequest: [fastify.authenticate],
     schema: {
@@ -24,12 +35,19 @@ const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> =>
           ip: { type: 'string', minLength: 1, maxLength: 64 },
           // Validated as URI; trailing slashes are stripped by the service.
           shopUrl: { type: 'string', format: 'uri', maxLength: 256 },
+          // Owner identity for the public legal pages. All optional;
+          // empty string means "не указано". Stale enum values are
+          // re-mapped to '' in the service so the frontend can't render
+          // garbage labels.
+          ownerName: { type: 'string', maxLength: 256 },
+          ownerType: { type: 'string', enum: ['', 'individual', 'self_employed', 'sole_proprietor', 'legal_entity'] },
+          ownerInn: { type: 'string', maxLength: 32 },
+          contactEmail: { type: 'string', maxLength: 256 },
         },
       },
     },
   }, async (request) => {
-    const { name, description, color, ip, shopUrl } = request.body;
-    return service.update({ name, description, color, ip, shopUrl });
+    return service.update(request.body);
   });
 };
 
