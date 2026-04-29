@@ -10,7 +10,7 @@ import { Optional } from 'sequelize';
 import { BaseModel } from './base.model';
 import { Customer } from './customer.model';
 
-export type PaymentStatus = 'pending' | 'paid' | 'delivered' | 'failed' | 'refunded';
+export type PaymentStatus = 'pending' | 'paid' | 'delivered' | 'failed' | 'refunded' | 'expired';
 
 interface PaymentAttributes {
   id: string;

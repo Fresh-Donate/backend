@@ -6,6 +6,7 @@ import { PaymentProvider } from '@/models/payment-provider.model';
 import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
 import { DeliveryService } from './delivery.service';
+import { PaymentExpirationService } from './payment-expiration.service';
 import { NotFoundError, ValidationError, PaymentError } from '@/core';
 import { Op, fn, col, literal } from 'sequelize';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
@@ -92,6 +93,7 @@ export class PaymentService {
   private customerService = new CustomerService();
   private settingsService = new SettingsService();
   private deliveryService = new DeliveryService();
+  private expirationService = new PaymentExpirationService();
 
   async create(data: CreatePaymentDto): Promise<PaymentDto> {
     // 1. Validate product
@@ -355,7 +357,10 @@ export class PaymentService {
       return;
     }
 
-    if (event === 'payment.succeeded' && payment.status === 'pending') {
+    // Late-arriving webhooks may target a payment we already auto-expired on
+    // our side (TTL exceeded, see PaymentExpirationService). Honour the
+    // success transition — the user actually paid, deliver the goods.
+    if (event === 'payment.succeeded' && (payment.status === 'pending' || payment.status === 'expired')) {
       // Payment succeeded — update with REAL amounts from YooKassa
       const paidAmount = object.amount ? Number(object.amount.value) : Number(payment.totalAmount);
       const incomeAmount = object.income_amount ? Number(object.income_amount.value) : undefined;
@@ -444,7 +449,7 @@ export class PaymentService {
     const status = payload.status;
     const isFinal = payload.is_final;
 
-    if ((status === 'paid' || status === 'paid_over') && payment.status === 'pending') {
+    if ((status === 'paid' || status === 'paid_over') && (payment.status === 'pending' || payment.status === 'expired')) {
       // Payment succeeded — update with real amounts from Heleket
       const paidAmount = payload.payment_amount ? Number(payload.payment_amount) : Number(payment.totalAmount);
       const merchantAmount = payload.merchant_amount ? Number(payload.merchant_amount) : undefined;
@@ -547,7 +552,7 @@ export class PaymentService {
       return;
     }
 
-    if (status === 'Paid' && payment.status === 'pending') {
+    if (status === 'Paid' && (payment.status === 'pending' || payment.status === 'expired')) {
       const paidAmount = payload.amount !== undefined ? Number(payload.amount) : Number(payment.totalAmount);
 
       await payment.update({
@@ -605,7 +610,11 @@ export class PaymentService {
       include: [{ model: Customer, required: false }],
     });
     if (!payment) throw new NotFoundError('Payment not found');
-    if (payment.status !== 'pending') throw new ValidationError('Payment is not pending');
+    // Allow admin to manually rescue an auto-expired payment too — useful
+    // when the webhook arrived late or the buyer paid offline.
+    if (payment.status !== 'pending' && payment.status !== 'expired') {
+      throw new ValidationError('Payment is not pending');
+    }
 
     await payment.update({
       status: 'paid',
@@ -659,7 +668,15 @@ export class PaymentService {
     const payment = await Payment.findByPk(id, {
       include: [{ model: Customer, required: false }],
     });
-    return payment ? toDto(payment) : null;
+    if (!payment) return null;
+
+    // Lazy-expire on read so the user-visible status flips the moment the
+    // /payments/:id/status poll picks it up — don't wait for the sweeper.
+    if (this.expirationService.isStale(payment)) {
+      await payment.update({ status: 'expired' });
+    }
+
+    return toDto(payment);
   }
 
   async findByCustomerId(customerId: string): Promise<PaymentDto[]> {
