@@ -1,12 +1,18 @@
 import { Payment, type PaymentStatus } from '@/models/payment.model';
 import { Customer } from '@/models/customer.model';
 import { Product } from '@/models/product.model';
+import { Promotion } from '@/models/promotion.model';
 import { PaymentOption } from '@/models/payment-option.model';
 import { PaymentProvider } from '@/models/payment-provider.model';
 import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
 import { DeliveryService } from './delivery.service';
 import { PaymentExpirationService } from './payment-expiration.service';
+import {
+  activePromotionsAt,
+  applyDiscount,
+  totalDiscountPercent,
+} from './promotion.service';
 import { NotFoundError, ValidationError, PaymentError } from '@/core';
 import { Op, fn, col, literal } from 'sequelize';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
@@ -96,8 +102,14 @@ export class PaymentService {
   private expirationService = new PaymentExpirationService();
 
   async create(data: CreatePaymentDto): Promise<PaymentDto> {
-    // 1. Validate product
-    const product = await Product.findByPk(data.productId);
+    // 1. Validate product — eager-load active promotions so the charged
+    //    amount is derived from the same source the shop is showing the
+    //    buyer. Re-fetching at create-time also closes the race where a
+    //    promo expired between the buyer landing on the page and clicking
+    //    "buy" — they pay the price that's *currently* in effect.
+    const product = await Product.findByPk(data.productId, {
+      include: [{ model: Promotion, through: { attributes: [] }, required: false }],
+    });
     if (!product) {
       throw new NotFoundError('Product not found');
     }
@@ -149,8 +161,14 @@ export class PaymentService {
       }
     }
 
-    // 5. Determine payment currency and commission from provider settings
-    const productPrice = Number(product.price) * count;
+    // 5. Determine payment currency and commission from provider settings.
+    //    Apply stacked promo discount first — the unit price the customer
+    //    saw on the product card is `discountedUnit`, and that's what we
+    //    charge them for `count` units.
+    const activePromos = activePromotionsAt(product.promotions);
+    const stackedPercent = totalDiscountPercent(activePromos);
+    const discountedUnit = applyDiscount(Number(product.price), stackedPercent);
+    const productPrice = Math.round(discountedUnit * count * 100) / 100;
     const productCurrency = product.currency;
     let paymentCurrency = productCurrency;
     let commissionPercent = 0;

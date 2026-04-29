@@ -1,5 +1,12 @@
 import { Product } from '@/models/product.model';
+import { Promotion } from '@/models/promotion.model';
 import { NotFoundError } from '@/core';
+import {
+  activePromotionsAt,
+  applyDiscount,
+  totalDiscountPercent,
+  type ProductPromotionDto,
+} from './promotion.service';
 
 export interface ProductDto {
   id: string;
@@ -12,6 +19,15 @@ export interface ProductDto {
   commands: string[];
   imageUrl: string;
   allowCustomCount: boolean;
+  /**
+   * Promotions currently in effect (now ∈ [startsAt, endsAt]). Empty when
+   * the product has no live discounts — shop renders the regular price.
+   */
+  activePromotions: ProductPromotionDto[];
+  /** Stacked discount %, capped at 100. */
+  discountPercent: number;
+  /** Price after `discountPercent` is applied. Equals `price` when no discount. */
+  discountedPrice: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,11 +55,14 @@ export interface UpdateProductDto {
   imageUrl?: string;
 }
 
-function toDto(p: Product): ProductDto {
+function toDto(p: Product, now: Date = new Date()): ProductDto {
+  const price = Number(p.price);
+  const active = activePromotionsAt(p.promotions, now);
+  const percent = totalDiscountPercent(active);
   return {
     id: p.id,
     name: p.name,
-    price: Number(p.price),
+    price,
     currency: p.currency,
     quantity: p.quantity,
     description: p.description,
@@ -53,17 +72,30 @@ function toDto(p: Product): ProductDto {
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
     allowCustomCount: p.allowCustomCount,
+    activePromotions: active,
+    discountPercent: percent,
+    discountedPrice: applyDiscount(price, percent),
   };
 }
 
+const PROMOTION_INCLUDE = {
+  model: Promotion,
+  through: { attributes: [] as string[] },
+  required: false,
+};
+
 export class ProductService {
   async findAll(): Promise<ProductDto[]> {
-    const products = await Product.findAll({ order: [['created_at', 'DESC']] });
-    return products.map(toDto);
+    const products = await Product.findAll({
+      order: [['created_at', 'DESC']],
+      include: [PROMOTION_INCLUDE],
+    });
+    const now = new Date();
+    return products.map((p) => toDto(p, now));
   }
 
   async findById(id: string): Promise<ProductDto> {
-    const product = await Product.findByPk(id);
+    const product = await Product.findByPk(id, { include: [PROMOTION_INCLUDE] });
     if (!product) throw new NotFoundError(`Product with id "${id}" not found`);
     return toDto(product);
   }
@@ -80,6 +112,7 @@ export class ProductService {
       imageUrl: data.imageUrl || '',
       allowCustomCount: data.allowCustomCount || false,
     });
+    // Brand-new product can't have promotions yet — skip the reload.
     return toDto(product);
   }
 
@@ -87,7 +120,8 @@ export class ProductService {
     const product = await Product.findByPk(id);
     if (!product) throw new NotFoundError(`Product with id "${id}" not found`);
     await product.update(data);
-    return toDto(product);
+    const reloaded = await Product.findByPk(id, { include: [PROMOTION_INCLUDE] });
+    return toDto(reloaded!);
   }
 
   async delete(id: string): Promise<void> {

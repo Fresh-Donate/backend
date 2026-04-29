@@ -3,9 +3,12 @@ import {
   Column,
   DataType,
   Default,
+  BelongsToMany,
 } from 'sequelize-typescript';
 import { Optional } from 'sequelize';
 import { BaseModel } from './base.model';
+import { Promotion } from './promotion.model';
+import { PromotionProduct } from './promotion-product.model';
 
 interface ProductAttributes {
   id: string;
@@ -58,4 +61,7 @@ export class Product extends BaseModel<ProductAttributes, ProductCreationAttribu
   @Default(false)
   @Column(DataType.BOOLEAN)
   declare allowCustomCount: boolean;
+
+  @BelongsToMany(() => Promotion, () => PromotionProduct)
+  declare promotions: Promotion[];
 }
