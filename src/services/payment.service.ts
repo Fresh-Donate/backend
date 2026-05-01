@@ -2,12 +2,14 @@ import { Payment, type PaymentStatus } from '@/models/payment.model';
 import { Customer } from '@/models/customer.model';
 import { Product } from '@/models/product.model';
 import { Promotion } from '@/models/promotion.model';
+import { Group } from '@/models/group.model';
 import { PaymentOption } from '@/models/payment-option.model';
 import { PaymentProvider } from '@/models/payment-provider.model';
 import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
 import { DeliveryService } from './delivery.service';
 import { PaymentExpirationService } from './payment-expiration.service';
+import { UpgradePricingService, type UpgradeEvaluation } from './upgrade-pricing.service';
 import {
   activePromotionsAt,
   applyDiscount,
@@ -100,6 +102,12 @@ export class PaymentService {
   private settingsService = new SettingsService();
   private deliveryService = new DeliveryService();
   private expirationService = new PaymentExpirationService();
+  private upgradePricingService = new UpgradePricingService();
+
+  /** Evaluate `(nickname, productId)` for the shop's preview endpoint. */
+  async previewPrice(nickname: string, productId: string): Promise<UpgradeEvaluation> {
+    return this.upgradePricingService.evaluate(nickname, productId);
+  }
 
   async create(data: CreatePaymentDto): Promise<PaymentDto> {
     // 1. Validate product — eager-load active promotions so the charged
@@ -108,16 +116,24 @@ export class PaymentService {
     //    promo expired between the buyer landing on the page and clicking
     //    "buy" — they pay the price that's *currently* in effect.
     const product = await Product.findByPk(data.productId, {
-      include: [{ model: Promotion, through: { attributes: [] }, required: false }],
+      include: [
+        { model: Promotion, through: { attributes: [] }, required: false },
+        { model: Group, through: { attributes: [] }, required: false },
+      ],
     });
     if (!product) {
       throw new NotFoundError('Product not found');
     }
 
-    // 1.1 Verify product type
-    const count = product.allowCustomCount
-      ? Math.max(1, Math.floor(Number(data.count) || 1))
-      : 1;
+    // 1.1 Verify product type. Privilege products are rank-style (1 unit
+    //     per purchase) — count is always coerced to 1 regardless of what
+    //     the client sent.
+    const isPrivilege = product.type === 'privilege';
+    const count = isPrivilege
+      ? 1
+      : product.allowCustomCount
+        ? Math.max(1, Math.floor(Number(data.count) || 1))
+        : 1;
 
     if (!product.allowCustomCount && count !== 1) {
       throw new ValidationError('This product does not support custom count');
@@ -162,13 +178,27 @@ export class PaymentService {
     }
 
     // 5. Determine payment currency and commission from provider settings.
-    //    Apply stacked promo discount first — the unit price the customer
-    //    saw on the product card is `discountedUnit`, and that's what we
-    //    charge them for `count` units.
+    //    Apply stacked promo discount first, then upgrade-mode «доплата»
+    //    on top of that. The order matters: promo trims the sticker price
+    //    to whatever the shop is currently advertising, then we subtract
+    //    the rank the buyer already owns. Same evaluator the /preview
+    //    endpoint runs, so what the modal showed is what gets charged.
+    const upgradeEval = await this.upgradePricingService.evaluate(data.nickname, product.id);
+    if (upgradeEval.blocked) {
+      throw new ValidationError(
+        upgradeEval.reference
+          ? `Этот товар нельзя купить — на нике "${data.nickname}" уже есть "${upgradeEval.reference.productName}" из этой группы.`
+          : 'Этот товар уже куплен на указанном нике.',
+      );
+    }
+
     const activePromos = activePromotionsAt(product.promotions);
     const stackedPercent = totalDiscountPercent(activePromos);
     const discountedUnit = applyDiscount(Number(product.price), stackedPercent);
-    const productPrice = Math.round(discountedUnit * count * 100) / 100;
+    const finalUnit = upgradeEval.upgradeDiscount > 0
+      ? Math.max(0, Math.round((discountedUnit - upgradeEval.upgradeDiscount) * 100) / 100)
+      : discountedUnit;
+    const productPrice = Math.round(finalUnit * count * 100) / 100;
     const productCurrency = product.currency;
     let paymentCurrency = productCurrency;
     let commissionPercent = 0;

@@ -13,8 +13,10 @@ import { Customer } from '@/models/customer.model';
 import { Payment } from '@/models/payment.model';
 import { Promotion } from '@/models/promotion.model';
 import { PromotionProduct } from '@/models/promotion-product.model';
+import { Group } from '@/models/group.model';
+import { GroupProduct } from '@/models/group-product.model';
 
-const models: any[] = [ShopSettings, Product, Settings, PaymentProvider, PaymentOption, Customer, Payment, Promotion, PromotionProduct];
+const models: any[] = [ShopSettings, Product, Settings, PaymentProvider, PaymentOption, Customer, Payment, Promotion, PromotionProduct, Group, GroupProduct];
 
 export const sequelize = new Sequelize({
   dialect: 'postgres',

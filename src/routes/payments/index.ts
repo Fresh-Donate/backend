@@ -44,6 +44,28 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return reply.code(201).send(payment);
   });
 
+  // POST /payments/preview — public. Given (productId, nickname), returns
+  // the unit price the buyer will actually be charged after promo + upgrade
+  // («доплата») discounts. Lets the shop modal show the real number before
+  // the buyer commits, instead of letting them discover it on the YooKassa
+  // page. Empty `nickname` returns the promo-aware price with no upgrade.
+  fastify.post<{
+    Body: { productId: string; nickname?: string };
+  }>('/preview', {
+    schema: {
+      body: {
+        type: 'object' as const,
+        required: ['productId'],
+        properties: {
+          productId: { type: 'string' as const },
+          nickname: { type: 'string' as const, maxLength: 16 },
+        },
+      },
+    },
+  }, async (request) => {
+    return service.previewPrice(request.body.nickname || '', request.body.productId);
+  });
+
   // GET /payments/:id/status — public, check payment status (for return page polling)
   fastify.get<{ Params: { id: string } }>('/:id/status', async (request, reply) => {
     const payment = await service.findById(request.params.id);

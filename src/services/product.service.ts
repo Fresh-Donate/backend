@@ -1,5 +1,6 @@
 import { Product } from '@/models/product.model';
 import { Promotion } from '@/models/promotion.model';
+import { Group } from '@/models/group.model';
 import { NotFoundError } from '@/core';
 import {
   activePromotionsAt,
@@ -7,6 +8,7 @@ import {
   totalDiscountPercent,
   type ProductPromotionDto,
 } from './promotion.service';
+import type { ProductGroupDto } from './group.service';
 
 export interface ProductDto {
   id: string;
@@ -28,6 +30,8 @@ export interface ProductDto {
   discountPercent: number;
   /** Price after `discountPercent` is applied. Equals `price` when no discount. */
   discountedPrice: number;
+  /** Groups this product belongs to (for the panel «Группы» column). */
+  groups: ProductGroupDto[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -59,6 +63,11 @@ function toDto(p: Product, now: Date = new Date()): ProductDto {
   const price = Number(p.price);
   const active = activePromotionsAt(p.promotions, now);
   const percent = totalDiscountPercent(active);
+  const groups = (p.groups || []).map((g) => ({
+    id: g.id,
+    name: g.name,
+    upgradeMode: g.upgradeMode,
+  }));
   return {
     id: p.id,
     name: p.name,
@@ -75,6 +84,7 @@ function toDto(p: Product, now: Date = new Date()): ProductDto {
     activePromotions: active,
     discountPercent: percent,
     discountedPrice: applyDiscount(price, percent),
+    groups,
   };
 }
 
@@ -84,18 +94,24 @@ const PROMOTION_INCLUDE = {
   required: false,
 };
 
+const GROUP_INCLUDE = {
+  model: Group,
+  through: { attributes: [] as string[] },
+  required: false,
+};
+
 export class ProductService {
   async findAll(): Promise<ProductDto[]> {
     const products = await Product.findAll({
       order: [['created_at', 'DESC']],
-      include: [PROMOTION_INCLUDE],
+      include: [PROMOTION_INCLUDE, GROUP_INCLUDE],
     });
     const now = new Date();
     return products.map((p) => toDto(p, now));
   }
 
   async findById(id: string): Promise<ProductDto> {
-    const product = await Product.findByPk(id, { include: [PROMOTION_INCLUDE] });
+    const product = await Product.findByPk(id, { include: [PROMOTION_INCLUDE, GROUP_INCLUDE] });
     if (!product) throw new NotFoundError(`Product with id "${id}" not found`);
     return toDto(product);
   }
@@ -120,7 +136,7 @@ export class ProductService {
     const product = await Product.findByPk(id);
     if (!product) throw new NotFoundError(`Product with id "${id}" not found`);
     await product.update(data);
-    const reloaded = await Product.findByPk(id, { include: [PROMOTION_INCLUDE] });
+    const reloaded = await Product.findByPk(id, { include: [PROMOTION_INCLUDE, GROUP_INCLUDE] });
     return toDto(reloaded!);
   }
 
