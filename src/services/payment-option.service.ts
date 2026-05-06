@@ -1,30 +1,10 @@
 import { PaymentOption } from '@/models/payment-option.model';
 import { NotFoundError } from '@/core';
-
-export interface PaymentOptionDto {
-  id: string;
-  name: string;
-  icon: string;
-  providerId: string;
-  sortOrder: number;
-  enabled: boolean;
-}
-
-export interface CreatePaymentOptionDto {
-  name: string;
-  icon: string;
-  providerId: string;
-  sortOrder?: number;
-  enabled?: boolean;
-}
-
-export interface UpdatePaymentOptionDto {
-  name?: string;
-  icon?: string;
-  providerId?: string;
-  sortOrder?: number;
-  enabled?: boolean;
-}
+import type {
+  PaymentOptionDto,
+  CreatePaymentOptionDto,
+  UpdatePaymentOptionDto,
+} from '@/types';
 
 function toDto(o: PaymentOption): PaymentOptionDto {
   return {

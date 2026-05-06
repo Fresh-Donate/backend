@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { Settings, type DeliveryMethod } from '@/models/settings.model';
+import { Settings } from '@/models/settings.model';
 import {
   SUPPORTED_CURRENCIES,
   DEFAULT_BASE_CURRENCY,
@@ -8,32 +8,15 @@ import {
   type CurrencyRates,
   type SupportedCurrency,
 } from '@/utils/currency';
-
-export interface SettingsDto {
-  demo_payments: boolean;
-  delivery_method: DeliveryMethod;
-  rcon_config: {
-    host: string;
-    port: number;
-    password: string;
-  };
-  plugin_config: {
-    token: string;
-  };
-  base_currency: SupportedCurrency;
-  currency_rates: CurrencyRates;
-}
+import type { SettingsDto } from '@/types';
 
 function generateToken(): string {
   return crypto.randomBytes(32).toString('hex').slice(0, 32);
 }
 
-/**
- * Drop unsupported codes, the base currency itself, and non-positive numbers.
- * Mirrors the panel's fixed RUB/USD/EUR allow-list — anything else is dropped
- * silently rather than rejected, so a partial update from a stale client
- * doesn't fail the whole PUT.
- */
+// Drop unsupported codes / non-positive numbers / the base currency itself.
+// Mirrors the panel's fixed RUB/USD/EUR allow-list — silently ignoring stale
+// keys keeps a partial PUT from a stale client from failing.
 function normalizeCurrencyRates(rates: CurrencyRates | undefined, base: SupportedCurrency): CurrencyRates | undefined {
   if (rates === undefined) return undefined;
   const out: CurrencyRates = {};
@@ -48,12 +31,9 @@ function normalizeCurrencyRates(rates: CurrencyRates | undefined, base: Supporte
   return out;
 }
 
-/**
- * Always emit a populated rate map for the two non-base currencies, even if
- * the stored row is partial or has stale codes left over from before a base
- * switch. Missing entries are filled with defaults so the panel never has to
- * decide what to render for an empty cell.
- */
+// Always emit a populated rate map for the two non-base currencies so the
+// panel never has to decide what to render for an empty cell — missing
+// entries are filled with defaults.
 function fillRatesForBase(stored: CurrencyRates | null | undefined, base: SupportedCurrency): CurrencyRates {
   const raw = stored ?? {};
   const defaults = defaultRatesFor(base);
@@ -119,8 +99,7 @@ export class SettingsService {
     const baseChanged = nextBase !== currentBase;
 
     // Old rates are "X per 1 unit of OLD_BASE" — meaningless under the new
-    // base. Don't try to migrate them; replace with sensible defaults so the
-    // admin can adjust from a known-good starting point.
+    // base. Replace with defaults rather than try to migrate.
     const startingRates = baseChanged ? defaultRatesFor(nextBase) : (settings.currency_rates ?? {});
     const patchRates = normalizeCurrencyRates(data.currency_rates, nextBase);
     const nextRates = patchRates ? { ...startingRates, ...patchRates } : startingRates;

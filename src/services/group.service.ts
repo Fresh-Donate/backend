@@ -2,37 +2,7 @@ import { Op } from 'sequelize';
 import { Group } from '@/models/group.model';
 import { Product } from '@/models/product.model';
 import { NotFoundError, ValidationError } from '@/core';
-
-export interface GroupDto {
-  id: string;
-  name: string;
-  upgradeMode: boolean;
-  productIds: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreateGroupDto {
-  name: string;
-  upgradeMode?: boolean;
-  productIds: string[];
-}
-
-export interface UpdateGroupDto {
-  name?: string;
-  upgradeMode?: boolean;
-  productIds?: string[];
-}
-
-/**
- * Slim view of a group used in the products table — only the bits the
- * panel needs to render the «Группы» column with an upgrade-mode hint.
- */
-export interface ProductGroupDto {
-  id: string;
-  name: string;
-  upgradeMode: boolean;
-}
+import type { GroupDto, CreateGroupDto, UpdateGroupDto } from '@/types';
 
 function toDto(g: Group): GroupDto {
   return {

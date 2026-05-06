@@ -1,31 +1,21 @@
 import { type FastifyPluginAsync } from 'fastify';
 import { PaymentOptionService } from '@/services/payment-option.service';
+import type { CreatePaymentOptionDto, UpdatePaymentOptionDto } from '@/types';
 
 const paymentOptionRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentOptionService();
 
-  // GET /payment-options — public (shop needs this)
   fastify.get('/', async () => {
     return service.findEnabled();
   });
 
-  // GET /payment-options/all — admin only (includes disabled)
   fastify.get('/all', {
     onRequest: [fastify.authenticate],
   }, async () => {
     return service.findAll();
   });
 
-  // POST /payment-options — admin only
-  fastify.post<{
-    Body: {
-      name: string;
-      icon: string;
-      providerId: string;
-      sortOrder?: number;
-      enabled?: boolean;
-    };
-  }>('/', {
+  fastify.post<{ Body: CreatePaymentOptionDto }>('/', {
     onRequest: [fastify.authenticate],
     schema: {
       body: {
@@ -45,16 +35,9 @@ const paymentOptionRoutes: FastifyPluginAsync = async (fastify): Promise<void> =
     return reply.code(201).send(option);
   });
 
-  // PUT /payment-options/:id — admin only
   fastify.put<{
     Params: { id: string };
-    Body: {
-      name?: string;
-      icon?: string;
-      providerId?: string;
-      sortOrder?: number;
-      enabled?: boolean;
-    };
+    Body: UpdatePaymentOptionDto;
   }>('/:id', {
     onRequest: [fastify.authenticate],
     schema: {
@@ -77,7 +60,6 @@ const paymentOptionRoutes: FastifyPluginAsync = async (fastify): Promise<void> =
     }
   });
 
-  // DELETE /payment-options/:id — admin only
   fastify.delete<{ Params: { id: string } }>('/:id', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {

@@ -1,18 +1,7 @@
 import { ShopSettings, type OwnerType } from '@/models/shop-settings.model';
+import type { ShopSettingsDto } from '@/types';
 
 const OWNER_TYPES: readonly OwnerType[] = ['', 'individual', 'self_employed', 'sole_proprietor', 'legal_entity'] as const;
-
-export interface ShopSettingsDto {
-  name: string;
-  description: string;
-  color: string;
-  ip: string;
-  shopUrl: string;
-  ownerName: string;
-  ownerType: OwnerType;
-  ownerInn: string;
-  contactEmail: string;
-}
 
 const DEFAULTS = {
   name: 'FreshDonate Shop',
@@ -26,22 +15,18 @@ const DEFAULTS = {
   contactEmail: '',
 };
 
-/** Strip trailing slashes from a URL — keeps canonical URLs consistent. */
 function normalizeShopUrl(url: string | undefined): string | undefined {
   if (url === undefined) return undefined;
   return url.replace(/\/+$/, '');
 }
 
-/**
- * Drop unknown owner-type strings to '' — if the panel sends a stale enum
- * value the legal pages would otherwise render a garbage label.
- */
+// Drop unknown owner-type strings to '' so a stale enum value from the panel
+// can't make legal pages render a garbage label.
 function normalizeOwnerType(value: OwnerType | string | undefined): OwnerType | undefined {
   if (value === undefined) return undefined;
   return (OWNER_TYPES as readonly string[]).includes(value) ? (value as OwnerType) : '';
 }
 
-/** Keep only digits — INN is numeric (10 or 12 digits), defensive trim. */
 function normalizeInn(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   return value.replace(/\D/g, '').slice(0, 12);
@@ -62,9 +47,6 @@ function toDto(s: ShopSettings): ShopSettingsDto {
 }
 
 export class ShopSettingsService {
-  /**
-   * Get settings (singleton — always returns first row or creates default)
-   */
   async get(): Promise<ShopSettingsDto> {
     const [settings] = await ShopSettings.findOrCreate({
       where: {},
@@ -74,9 +56,6 @@ export class ShopSettingsService {
     return toDto(settings);
   }
 
-  /**
-   * Update settings (singleton — updates first row or creates it)
-   */
   async update(data: Partial<ShopSettingsDto>): Promise<ShopSettingsDto> {
     const [settings] = await ShopSettings.findOrCreate({
       where: {},

@@ -6,7 +6,6 @@ const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const customerService = new CustomerService();
   const paymentService = new PaymentService();
 
-  // GET /customers — admin only
   fastify.get<{
     Querystring: {
       search?: string;
@@ -21,7 +20,7 @@ const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     const { search, limit, offset, sortBy, sortOrder } = request.query;
 
     // Whitelist sort params — protects against arbitrary SQL identifiers
-    // sneaking into the ORDER clause via the literal() branch.
+    // sneaking into the ORDER clause via the literal() branch in the service.
     const allowedSortBy = ['nickname', 'email', 'createdAt', 'purchaseCount', 'totalSpent'] as const;
     type SortBy = typeof allowedSortBy[number];
     const validSortBy: SortBy | undefined = (allowedSortBy as readonly string[]).includes(sortBy ?? '')
@@ -39,7 +38,6 @@ const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     });
   });
 
-  // GET /customers/:id — admin only
   fastify.get<{ Params: { id: string } }>('/:id', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
@@ -48,7 +46,6 @@ const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return customer;
   });
 
-  // GET /customers/:id/payments — admin only
   fastify.get<{ Params: { id: string } }>('/:id/payments', {
     onRequest: [fastify.authenticate],
   }, async (request) => {

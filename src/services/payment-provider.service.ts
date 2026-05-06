@@ -1,29 +1,7 @@
-import { PaymentProvider, type CommissionRuleData } from '@/models/payment-provider.model';
+import { PaymentProvider } from '@/models/payment-provider.model';
 import { NotFoundError } from '@/core';
+import type { PaymentProviderDto, UpdatePaymentProviderDto } from '@/types';
 
-export interface PaymentProviderDto {
-  id: string;
-  providerId: string;
-  name: string;
-  description: string;
-  icon: string;
-  enabled: boolean;
-  testMode: boolean;
-  credentials: Record<string, string>;
-  commissionPercent: number;
-  commissionRule: CommissionRuleData;
-  supportedCurrencies: string[];
-}
-
-export interface UpdatePaymentProviderDto {
-  enabled?: boolean;
-  testMode?: boolean;
-  credentials?: Record<string, string>;
-  commissionPercent?: number;
-  commissionRule?: CommissionRuleData;
-}
-
-/** Default provider definitions — seeded on first request */
 const DEFAULT_PROVIDERS: Array<{
   providerId: string;
   name: string;
@@ -39,7 +17,6 @@ const DEFAULT_PROVIDERS: Array<{
     description: 'Приём платежей для РФ: банковские карты, СБП, ЮMoney, SberPay, T-Pay',
     icon: 'i-lucide-credit-card',
     credentials: { shopId: '', secretKey: '' },
-    // Typical bank-card tariff; edit to match your actual YooKassa contract.
     commissionPercent: 2.8,
     supportedCurrencies: ['RUB'],
   },
@@ -82,14 +59,9 @@ function toDto(p: PaymentProvider): PaymentProviderDto {
 export class PaymentProviderService {
   private seeded = false;
 
-  /**
-   * Seed default providers.
-   *
-   * Idempotent per-provider: for every entry in `DEFAULT_PROVIDERS` we insert
-   * the row if it's missing and leave existing rows alone. This is what makes
-   * new providers (like `wata` after an upgrade) appear on an already-seeded
-   * installation.
-   */
+  // Idempotent per-provider seed: missing providers are inserted, existing ones
+  // left alone. Lets new providers (e.g. wata after an upgrade) appear on an
+  // already-seeded installation without manual migration.
   private async seed(): Promise<void> {
     if (this.seeded) return;
 

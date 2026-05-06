@@ -5,12 +5,8 @@ import { config } from '@/config';
 
 const imageService = new ImageService();
 
-/**
- * Build the public URL for a stored upload. Prefers an explicit
- * `BACKEND_PUBLIC_URL` (from config) so URLs persisted in the DB stay
- * stable across reverse-proxy hops; falls back to the incoming request's
- * scheme + host when no override is configured (typical local dev).
- */
+// Prefer BACKEND_PUBLIC_URL so URLs persisted in the DB stay stable across
+// reverse-proxy hops; fall back to the request's scheme + host for local dev.
 function buildPublicUrl(request: FastifyRequest, relativePath: string): string {
   const base =
     config.uploads.publicBaseUrl
@@ -19,12 +15,6 @@ function buildPublicUrl(request: FastifyRequest, relativePath: string): string {
 }
 
 const uploadsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
-  /**
-   * POST /uploads/product-image — admin-only.
-   * Accepts a single multipart file under any field name, recompresses to
-   * WebP via {@link ImageService}, and returns the public URL the panel
-   * should store on the product.
-   */
   fastify.post('/product-image', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
@@ -33,8 +23,8 @@ const uploadsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       throw new ValidationError('No file uploaded');
     }
 
-    // Drain the stream into memory. We've already capped fileSize via the
-    // multipart plugin, so this won't blow up RAM.
+    // fileSize is capped by the multipart plugin, so draining to a Buffer
+    // here is bounded and won't blow up RAM.
     const buffer = await file.toBuffer();
     if (file.file.truncated) {
       throw new ValidationError(

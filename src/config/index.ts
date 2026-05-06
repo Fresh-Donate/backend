@@ -43,17 +43,11 @@ export const config = {
   },
 
   uploads: {
-    // Filesystem location for user-uploaded assets (product images etc.).
-    // In Docker this is backed by a persistent volume — see docker-compose.yml.
     dir: process.env.UPLOADS_DIR || 'uploads',
-    // Hard upper bound on a single uploaded file. We resize/recompress on
-    // ingest, so this only needs to accommodate the largest source the admin
-    // might drop in (phone photos can hit ~10 MB).
-    maxFileSize: parseInt(process.env.UPLOADS_MAX_FILE_SIZE || '10485760', 10), // 10 MB
-    // Optional canonical URL of the backend ("https://api.example.com").
-    // When set, upload responses return absolute URLs built from this; when
-    // empty, the URL is derived from the incoming request — handy for local
-    // dev where the backend is reached at multiple hostnames.
+    maxFileSize: parseInt(process.env.UPLOADS_MAX_FILE_SIZE || '10485760', 10),
+    // When set, upload responses return absolute URLs built from this base —
+    // keeps DB-persisted URLs stable across reverse-proxy hops. Empty falls
+    // back to deriving from the incoming request (handy for local dev).
     publicBaseUrl: process.env.BACKEND_PUBLIC_URL || '',
   },
 } as const;

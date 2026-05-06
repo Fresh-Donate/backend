@@ -1,15 +1,14 @@
 import { type FastifyPluginAsync } from 'fastify';
-import { SettingsService, type SettingsDto } from '@/services/settings.service';
+import { SettingsService } from '@/services/settings.service';
+import type { SettingsDto } from '@/types';
 
 const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new SettingsService();
 
-  // GET /settings — admin only
   fastify.get('/', { onRequest: [fastify.authenticate] }, async () => {
     return service.get();
   });
 
-  // PUT /settings — admin only
   fastify.put<{
     Body: {
       demo_payments?: boolean;
@@ -41,13 +40,9 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
               token: { type: 'string' as const, maxLength: 64 },
             },
           },
-          // Closed allow-list — switching the base resets the rate map to
-          // defaults for the new base, so stale "X per old base" values
-          // can't survive the change.
+          // Switching the base resets the rate map to defaults — stale
+          // "X per old base" values can't survive the change.
           base_currency: { type: 'string' as const, enum: ['RUB', 'USD', 'EUR'] },
-          // Map of "currency code → how many of base_currency in 1 unit".
-          // The service drops codes outside the allow-list, the base itself,
-          // and non-positive values.
           currency_rates: {
             type: 'object' as const,
             additionalProperties: { type: 'number' as const, minimum: 0, maximum: 100000 },

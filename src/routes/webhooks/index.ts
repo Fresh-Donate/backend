@@ -8,10 +8,10 @@ import { PaymentProvider } from '@/models/payment-provider.model';
 const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const paymentService = new PaymentService();
 
-  // Inside this plugin scope, replace the default JSON body parser with one
-  // that ALSO preserves the raw bytes on `request.rawBody`. This is only
-  // needed for gateways (like Wata) that sign the raw request body, and
-  // the encapsulated scope means we don't touch other plugins' parsing.
+  // Replace the JSON parser inside this scope so we can keep the raw bytes
+  // on `request.rawBody`. Wata signs the raw body; re-serialising would
+  // produce a different signature. Encapsulated, so other plugins are
+  // untouched.
   fastify.removeContentTypeParser('application/json');
   fastify.addContentTypeParser(
     'application/json',
@@ -31,13 +31,8 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     },
   );
 
-  /**
-   * POST /webhooks/yookassa — YooKassa payment notification
-   * @see https://yookassa.ru/developers/using-api/webhooks
-   *
-   * YooKassa sends a JSON body with { type, event, object }
-   * No auth header — validated by source IP
-   */
+  // YooKassa: no signing — validated by source IP. x-forwarded-for takes
+  // priority when behind a reverse proxy (Docker, nginx).
   fastify.post<{
     Body: {
       type: string;
@@ -58,8 +53,6 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       },
     },
   }, async (request, reply) => {
-    // Validate source IP (YooKassa sends from specific IP ranges)
-    // x-forwarded-for takes priority when behind a reverse proxy (Docker, nginx, etc.)
     const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
     const clientIp = forwardedFor || request.ip || '';
 
@@ -78,21 +71,14 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     try {
       await paymentService.handleYooKassaWebhook(event, object);
     } catch (error: any) {
-      // Log but don't fail — YooKassa retries on non-200
+      // Log but don't fail — YooKassa retries on non-200, and we'd rather
+      // ack a flawed payload than receive duplicates.
       request.log.error(`YooKassa webhook processing error: ${error.message}`);
     }
 
-    // Always respond 200 to acknowledge receipt
     return reply.code(200).send({ status: 'ok' });
   });
 
-  /**
-   * POST /webhooks/heleket — Heleket crypto payment notification
-   * @see https://docs.heleket.com
-   *
-   * Heleket sends a flat JSON with { type, uuid, order_id, status, sign, ... }
-   * Validated by signature + source IP
-   */
   fastify.post<{
     Body: Record<string, any>;
   }>('/heleket', {
@@ -106,7 +92,6 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
     const { apiKey, merchantId } = provider.credentials;
 
-    // IP validation
     const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
     const clientIp = forwardedFor || request.ip || '';
 
@@ -118,7 +103,6 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       return reply.code(403).send({ error: 'Forbidden' });
     }
 
-    // Signature verification
     if (apiKey) {
       const gateway = new HeleketGateway(merchantId, apiKey);
       if (!gateway.verifyWebhookSignature(request.body)) {
@@ -139,15 +123,9 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return reply.code(200).send({ status: 'ok' });
   });
 
-  /**
-   * POST /webhooks/wata — Wata payment notification
-   * @see https://wata.pro/api
-   *
-   * Wata signs the raw request body with RSA-SHA512 and ships the base64
-   * signature in the `X-Signature` header. The public key is fetched from
-   * the same environment (prod or sandbox) that created the payment link,
-   * selected by the provider's `testMode` flag.
-   */
+  // Wata signs the raw request body with RSA-SHA512 (X-Signature header,
+  // base64). Public key is fetched from the same env (prod or sandbox) the
+  // payment link was created in, picked via provider.testMode.
   fastify.post<{ Body: Record<string, any> }>('/wata', {
     config: { rateLimit: { max: 200, timeWindow: 60000 } },
   }, async (request, reply) => {

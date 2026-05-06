@@ -1,5 +1,6 @@
 import { type FastifyPluginAsync } from 'fastify';
 import { GroupService } from '@/services/group.service';
+import type { CreateGroupDto, UpdateGroupDto } from '@/types';
 
 const groupBodySchema = {
   type: 'object' as const,
@@ -23,13 +24,7 @@ const groupRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return service.findById(request.params.id);
   });
 
-  fastify.post<{
-    Body: {
-      name: string;
-      upgradeMode?: boolean;
-      productIds?: string[];
-    };
-  }>('/', {
+  fastify.post<{ Body: CreateGroupDto }>('/', {
     onRequest: [fastify.authenticate],
     schema: {
       body: {
@@ -48,11 +43,7 @@ const groupRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
   fastify.put<{
     Params: { id: string };
-    Body: {
-      name?: string;
-      upgradeMode?: boolean;
-      productIds?: string[];
-    };
+    Body: UpdateGroupDto;
   }>('/:id', {
     onRequest: [fastify.authenticate],
     schema: { body: groupBodySchema },

@@ -7,46 +7,17 @@ import { Promotion } from '@/models/promotion.model';
 import { SettingsService } from './settings.service';
 import { activePromotionsAt, applyDiscount, totalDiscountPercent } from './promotion.service';
 import { convert } from '@/utils/currency';
+import type { UpgradeEvaluation } from '@/types';
 
-export type UpgradeBlockReason = 'already_owned_or_cheaper';
-
-export interface UpgradeEvaluation {
-  /** Discount in `currency` to subtract from this product's already-promo'd unit price. */
-  upgradeDiscount: number;
-  /** Promo-aware unit price BEFORE upgrade discount, in `currency`. */
-  unitPrice: number;
-  /** Final per-unit price after upgrade discount; never negative. */
-  finalUnitPrice: number;
-  /** Currency of all the numbers above (always equals the target product's currency). */
-  currency: string;
-  /** Set when the buyer has already paid for an equally- or higher-priced product in any of this product's upgrade groups. */
-  blocked: boolean;
-  blockedReason?: UpgradeBlockReason;
-  /** Hints for the UI — id + name of the prior in-group product that drove the discount/block, if any. */
-  reference?: {
-    productId: string;
-    productName: string;
-    referencePrice: number;
-  };
-}
-
-/**
- * Compute "доплата" pricing for `(nickname, productId)`. The rule is:
- *
- *  - For every group containing this product where `upgradeMode = true`,
- *    find the customer's most recent successful purchase of any *other*
- *    in-group product. (Buying the same product again counts too — it
- *    just trips the `blocked` branch since the new price ≤ its own price.)
- *  - That product's *current* promo-aware price (converted into the target
- *    currency if needed) is the "reference price" for that group.
- *  - If `currentTargetPrice <= referencePrice` → blocked.
- *  - Otherwise the group offers `discount = referencePrice`. Across multiple
- *    upgrade groups, the highest discount wins, but a block in *any* group
- *    blocks overall — having any same-or-higher rank precludes the buy.
- *
- * Currency conversion goes through the admin's `currency_rates` so a prior
- * USD purchase still drives a discount on a RUB product, etc.
- */
+// "Доплата" pricing for (nickname, productId):
+//   - For each upgradeMode group containing this product, find the buyer's
+//     most recent successful purchase of any other in-group product.
+//   - Use that prior product's *current* promo-aware price as the reference
+//     (converted into the target currency via admin currency_rates).
+//   - If currentTargetPrice <= referencePrice → blocked (same rank or lower,
+//     nothing to upgrade).
+//   - Otherwise discount = referencePrice. Across multiple upgrade groups,
+//     highest discount wins, but a block in any group blocks overall.
 export class UpgradePricingService {
   private settingsService = new SettingsService();
 
@@ -58,9 +29,6 @@ export class UpgradePricingService {
       ],
     });
     if (!product) {
-      // Caller is responsible for the "product missing" error; here we just
-      // produce a no-op evaluation so the preview endpoint can still respond
-      // sanely without throwing.
       return {
         upgradeDiscount: 0,
         unitPrice: 0,
@@ -96,10 +64,9 @@ export class UpgradePricingService {
       const groupProductIds = await this.productIdsInGroup(group.id);
       if (groupProductIds.length === 0) continue;
 
-      // Latest successful in-group purchase by this nickname. We DON'T
-      // exclude the target product itself — buying the same rank again
-      // should still be caught by the "<=" branch and blocked, which is
-      // the cleaner failure mode than "discount = full price → free".
+      // Don't exclude the target product itself — the "<=" branch below
+      // catches "buying the same rank again" and blocks it cleanly, which
+      // is preferable to letting it through with discount = full price.
       const lastPayment = await Payment.findOne({
         where: {
           status: { [Op.in]: ['paid', 'delivered'] },
@@ -110,8 +77,7 @@ export class UpgradePricingService {
       });
       if (!lastPayment) continue;
 
-      // Prior product may have been deleted between purchase and now — fall
-      // through silently rather than block on stale data.
+      // Prior product may have been deleted between purchase and now.
       const prior = await Product.findByPk(lastPayment.productId, {
         include: [{ model: Promotion, through: { attributes: [] as string[] }, required: false }],
       });
@@ -121,8 +87,6 @@ export class UpgradePricingService {
       const priorPercent = totalDiscountPercent(activePromotionsAt(prior.promotions));
       const priorCurrentPrice = applyDiscount(priorBase, priorPercent);
 
-      // Drag everything into the target's currency before comparing — a
-      // 100 USD prior is worth ~9500 RUB on a RUB product.
       const referenceInTarget = convert(
         priorCurrentPrice,
         prior.currency,
@@ -137,8 +101,8 @@ export class UpgradePricingService {
         if (!reference || refRounded > reference.referencePrice) {
           reference = { productId: prior.id, productName: prior.name, referencePrice: refRounded };
         }
-        // Don't break — keep scanning so `reference` ends up pointing at
-        // the most expensive blocking rank if there are several.
+        // Keep scanning so `reference` ends up pointing at the most expensive
+        // blocking rank when several groups would all block.
         continue;
       }
 

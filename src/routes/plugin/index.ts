@@ -6,9 +6,6 @@ import { SettingsService } from '@/services/settings.service';
 
 const settingsService = new SettingsService();
 
-/**
- * Authenticate plugin requests via X-Api-Key header
- */
 async function authenticatePlugin(request: any, reply: any): Promise<void> {
   const apiKey = request.headers['x-api-key'];
   if (!apiKey) {
@@ -23,14 +20,12 @@ async function authenticatePlugin(request: any, reply: any): Promise<void> {
 
 const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
-  // GET /plugin/ping — verify connection and API key
   fastify.get('/ping', {
     preHandler: authenticatePlugin,
   }, async () => {
     return { status: 'ok' };
   });
 
-  // GET /plugin/deliveries/pending — get payments awaiting plugin delivery
   fastify.get('/deliveries/pending', {
     preHandler: authenticatePlugin,
   }, async () => {
@@ -45,7 +40,8 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       limit: 50,
     });
 
-    // Filter to those with commands (need product lookup)
+    // Only payments whose product still has commands need plugin delivery —
+    // command-less ones are auto-marked delivered by DeliveryService.
     const result = [];
 
     for (const payment of payments) {
@@ -67,7 +63,6 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return result;
   });
 
-  // POST /plugin/deliveries/:paymentId/result — report delivery result
   fastify.post<{
     Params: { paymentId: string };
     Body: {
@@ -112,7 +107,6 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       return reply.code(400).send({ error: 'Payment is not in paid status' });
     }
 
-    // Build delivery log entry
     const existingLogs = payment.meta?.deliveryLogs || [];
     const attempt = existingLogs.length + 1;
 

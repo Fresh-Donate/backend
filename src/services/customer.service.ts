@@ -3,23 +3,8 @@ import { Payment } from '@/models/payment.model';
 import { Op, fn, col, literal } from 'sequelize';
 import { SettingsService } from './settings.service';
 import { buildAmountInBaseSql } from '@/utils/currency';
+import type { CustomerDto, CustomerCurrencyStats } from '@/types';
 
-export interface CustomerCurrencyStats {
-  currency: string;
-  totalSpent: number;
-  purchaseCount: number;
-}
-
-export interface CustomerDto {
-  id: string;
-  nickname: string;
-  email: string;
-  stats: CustomerCurrencyStats[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-// Учитываются только успешные платежи
 const COUNTED_STATUSES = ['paid', 'delivered'];
 
 function toDto(c: Customer, stats: CustomerCurrencyStats[]): CustomerDto {
@@ -107,13 +92,9 @@ export class CustomerService {
     const sortBy = options?.sortBy ?? 'createdAt';
     const sortDirection = options?.sortOrder === 'asc' ? 'ASC' : 'DESC';
 
-    // Whitelist-driven ORDER. Aggregate columns (`purchaseCount`, `totalSpent`)
-    // are computed via correlated subqueries — only successful payments are
-    // counted, matching aggregateStatsForCustomers. `totalSpent` normalises
-    // each payment into RUB on the fly using the admin-configured rates,
-    // making cross-currency sums comparable. Other columns map straight to
-    // physical Customer columns. Always include a stable secondary
-    // `created_at` so the page boundary doesn't reshuffle on equal keys.
+    // Aggregate sort columns (purchaseCount/totalSpent) are computed via
+    // correlated subqueries on the fly. totalSpent normalises into the
+    // admin's base currency so cross-currency sums are comparable.
     let order: any[];
     if (sortBy === 'purchaseCount') {
       order = [
@@ -145,7 +126,6 @@ export class CustomerService {
     } else if (sortBy === 'createdAt') {
       order = [['created_at', sortDirection]];
     } else {
-      // 'nickname' or 'email' — physical columns on customers.
       order = [[sortBy, sortDirection], ['created_at', 'DESC']];
     }
 

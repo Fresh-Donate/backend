@@ -2,62 +2,12 @@ import { Product } from '@/models/product.model';
 import { Promotion } from '@/models/promotion.model';
 import { Group } from '@/models/group.model';
 import { NotFoundError } from '@/core';
+import type { ProductDto, CreateProductDto, UpdateProductDto } from '@/types';
 import {
   activePromotionsAt,
   applyDiscount,
   totalDiscountPercent,
-  type ProductPromotionDto,
 } from './promotion.service';
-import type { ProductGroupDto } from './group.service';
-
-export interface ProductDto {
-  id: string;
-  name: string;
-  price: number;
-  currency: string;
-  quantity: number;
-  description: string;
-  type: string;
-  commands: string[];
-  imageUrl: string;
-  allowCustomCount: boolean;
-  /**
-   * Promotions currently in effect (now ∈ [startsAt, endsAt]). Empty when
-   * the product has no live discounts — shop renders the regular price.
-   */
-  activePromotions: ProductPromotionDto[];
-  /** Stacked discount %, capped at 100. */
-  discountPercent: number;
-  /** Price after `discountPercent` is applied. Equals `price` when no discount. */
-  discountedPrice: number;
-  /** Groups this product belongs to (for the panel «Группы» column). */
-  groups: ProductGroupDto[];
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface CreateProductDto {
-  name: string;
-  price: number;
-  currency: string;
-  quantity: number;
-  description?: string;
-  type: string;
-  commands?: string[];
-  imageUrl?: string;
-  allowCustomCount: boolean;
-}
-
-export interface UpdateProductDto {
-  name?: string;
-  price?: number;
-  currency?: string;
-  quantity?: number;
-  description?: string;
-  type?: string;
-  commands?: string[];
-  imageUrl?: string;
-}
 
 function toDto(p: Product, now: Date = new Date()): ProductDto {
   const price = Number(p.price);
@@ -128,7 +78,6 @@ export class ProductService {
       imageUrl: data.imageUrl || '',
       allowCustomCount: data.allowCustomCount || false,
     });
-    // Brand-new product can't have promotions yet — skip the reload.
     return toDto(product);
   }
 

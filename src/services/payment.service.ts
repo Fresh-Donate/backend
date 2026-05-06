@@ -9,7 +9,7 @@ import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
 import { DeliveryService } from './delivery.service';
 import { PaymentExpirationService } from './payment-expiration.service';
-import { UpgradePricingService, type UpgradeEvaluation } from './upgrade-pricing.service';
+import { UpgradePricingService } from './upgrade-pricing.service';
 import {
   activePromotionsAt,
   applyDiscount,
@@ -19,45 +19,15 @@ import { NotFoundError, ValidationError, PaymentError } from '@/core';
 import { Op, fn, col, literal } from 'sequelize';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
-import { WataGateway, type WataWebhookPayload } from '@/gateways/wata.gateway';
+import { WataGateway } from '@/gateways/wata.gateway';
 import { config } from '@/config';
 import { buildAmountInTargetSql, isSupportedCurrency } from '@/utils/currency';
-
-export interface PaymentDto {
-  id: string;
-  customerId: string;
-  customerNickname?: string;
-  customerEmail?: string;
-  productId: string;
-  productName: string;
-  productPrice: number;
-  productCurrency: string;
-  currency: string;
-  quantity: number;
-  totalAmount: number;
-  commissionPercent: number;
-  commissionAmount: number;
-  providerAmount: number;
-  status: PaymentStatus;
-  paymentOptionId: string | null;
-  providerId: string | null;
-  externalPaymentId: string | null;
-  externalPaymentUrl: string | null;
-  paidAt: string | null;
-  deliveredAt: string | null;
-  meta: Record<string, any>;
-  createdAt: string;
-  updatedAt: string;
-  userSelectedCount: number;
-}
-
-export interface CreatePaymentDto {
-  productId: string;
-  nickname: string;
-  email: string;
-  count?: number;
-  paymentOptionId: string;
-}
+import type {
+  PaymentDto,
+  CreatePaymentDto,
+  UpgradeEvaluation,
+  WataWebhookPayload,
+} from '@/types';
 
 function toDto(p: Payment): PaymentDto {
   return {
@@ -89,9 +59,10 @@ function toDto(p: Payment): PaymentDto {
   };
 }
 
-// Simple in-memory cache for pending payments (productId+customerId → paymentId)
+// Idempotency cache: same (customer, product, count) request within 2 min
+// returns the existing pending payment instead of double-charging.
 const paymentCache = new Map<string, { paymentId: string; expiresAt: number }>();
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+const CACHE_TTL = 2 * 60 * 1000;
 
 function getCacheKey(customerId: string, productId: string): string {
   return `${customerId}:${productId}`;
@@ -104,17 +75,11 @@ export class PaymentService {
   private expirationService = new PaymentExpirationService();
   private upgradePricingService = new UpgradePricingService();
 
-  /** Evaluate `(nickname, productId)` for the shop's preview endpoint. */
   async previewPrice(nickname: string, productId: string): Promise<UpgradeEvaluation> {
     return this.upgradePricingService.evaluate(nickname, productId);
   }
 
   async create(data: CreatePaymentDto): Promise<PaymentDto> {
-    // 1. Validate product — eager-load active promotions so the charged
-    //    amount is derived from the same source the shop is showing the
-    //    buyer. Re-fetching at create-time also closes the race where a
-    //    promo expired between the buyer landing on the page and clicking
-    //    "buy" — they pay the price that's *currently* in effect.
     const product = await Product.findByPk(data.productId, {
       include: [
         { model: Promotion, through: { attributes: [] }, required: false },
@@ -125,9 +90,8 @@ export class PaymentService {
       throw new NotFoundError('Product not found');
     }
 
-    // 1.1 Verify product type. Privilege products are rank-style (1 unit
-    //     per purchase) — count is always coerced to 1 regardless of what
-    //     the client sent.
+    // Privilege products are rank-style — count is always 1, ignoring whatever
+    // the client sent. Other products honour custom-count when allowed.
     const isPrivilege = product.type === 'privilege';
     const count = isPrivilege
       ? 1
@@ -135,14 +99,12 @@ export class PaymentService {
         ? Math.max(1, Math.floor(Number(data.count) || 1))
         : 1;
 
-    if (!product.allowCustomCount && count !== 1) {
+    if (!product.allowCustomCount && !isPrivilege && count !== 1) {
       throw new ValidationError('This product does not support custom count');
     }
 
-    // 2. Find or create customer
     const customer = await this.customerService.findOrCreate(data.nickname, data.email);
 
-    // 3. Check cache — if a pending payment already exists, return it
     const cacheKey = getCacheKey(customer.id, `${data.productId}_${count}`);
     const cached = paymentCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
@@ -155,7 +117,6 @@ export class PaymentService {
       paymentCache.delete(cacheKey);
     }
 
-    // 4. Validate payment option and provider
     const option = await PaymentOption.findByPk(data.paymentOptionId);
     if (!option) {
       throw new ValidationError('Payment option not found');
@@ -163,7 +124,6 @@ export class PaymentService {
 
     const provider = await PaymentProvider.findOne({ where: { providerId: option.providerId } });
 
-    // Check provider is usable (skip check if demo mode)
     const settings = await this.settingsService.get();
     if (!settings.demo_payments) {
       if (!provider) {
@@ -177,12 +137,8 @@ export class PaymentService {
       }
     }
 
-    // 5. Determine payment currency and commission from provider settings.
-    //    Apply stacked promo discount first, then upgrade-mode «доплата»
-    //    on top of that. The order matters: promo trims the sticker price
-    //    to whatever the shop is currently advertising, then we subtract
-    //    the rank the buyer already owns. Same evaluator the /preview
-    //    endpoint runs, so what the modal showed is what gets charged.
+    // Pricing order: promo → upgrade «доплата» → multiply by count. Same
+    // evaluator as /preview, so what the modal showed is what we charge.
     const upgradeEval = await this.upgradePricingService.evaluate(data.nickname, product.id);
     if (upgradeEval.blocked) {
       throw new ValidationError(
@@ -207,15 +163,14 @@ export class PaymentService {
     let providerAmount = productPrice;
 
     if (provider) {
-      // Determine actual payment currency from provider
       if (provider.supportedCurrencies.length > 0) {
         paymentCurrency = provider.supportedCurrencies.includes(productCurrency)
           ? productCurrency
           : provider.supportedCurrencies[0];
       }
 
-      // Commission is a per-provider default — actual fees from webhook data
-      // overwrite this later.
+      // Per-provider default commission — overwritten by webhook data once the
+      // payment completes (real fee from provider receipt).
       commissionPercent = Number(provider.commissionPercent) || 0;
       commissionAmount = Math.round(productPrice * commissionPercent) / 100;
 
@@ -233,7 +188,6 @@ export class PaymentService {
       }
     }
 
-    // 5. Create payment record
     const payment = await Payment.create({
       customerId: customer.id,
       productId: product.id,
@@ -251,16 +205,13 @@ export class PaymentService {
       userSelectedCount: count,
     });
 
-    // 7. Check if demo mode
     if (settings.demo_payments) {
-      // Demo: instantly mark as paid
       await payment.update({
         status: 'paid',
         paidAt: new Date(),
         meta: { demo: true },
       });
 
-      // Attempt delivery (RCON with retries)
       await this.deliveryService.attemptDelivery(payment.id);
 
       const result = await Payment.findByPk(payment.id, {
@@ -270,13 +221,11 @@ export class PaymentService {
       return toDto(result);
     }
 
-    // 8. Non-demo: cache the pending payment for 2 minutes
     paymentCache.set(cacheKey, {
       paymentId: payment.id,
       expiresAt: Date.now() + CACHE_TTL,
     });
 
-    // 9. Create external payment via provider gateway
     if (provider && provider.enabled) {
       await this.createExternalPayment(payment, provider, product.name);
     }
@@ -288,12 +237,8 @@ export class PaymentService {
     return toDto(result);
   }
 
-  /**
-   * Create external payment via provider gateway (YooKassa, etc.).
-   *
-   * We don't force a specific payment method on any provider — the buyer picks
-   * the actual method (card / SBP / crypto / …) on the provider's own checkout.
-   */
+  // We don't force a payment method on any provider — the buyer picks
+  // (card / SBP / crypto / …) on the provider's own checkout.
   private async createExternalPayment(
     payment: Payment,
     provider: InstanceType<typeof PaymentProvider>,
@@ -389,9 +334,6 @@ export class PaymentService {
     }
   }
 
-  /**
-   * Handle YooKassa webhook notification
-   */
   async handleYooKassaWebhook(event: string, object: any): Promise<void> {
     const externalId = object?.id;
     if (!externalId) return;
@@ -405,15 +347,12 @@ export class PaymentService {
       return;
     }
 
-    // Late-arriving webhooks may target a payment we already auto-expired on
-    // our side (TTL exceeded, see PaymentExpirationService). Honour the
+    // Late webhooks may target a payment we already auto-expired. Honour the
     // success transition — the user actually paid, deliver the goods.
     if (event === 'payment.succeeded' && (payment.status === 'pending' || payment.status === 'expired')) {
-      // Payment succeeded — update with REAL amounts from YooKassa
       const paidAmount = object.amount ? Number(object.amount.value) : Number(payment.totalAmount);
       const incomeAmount = object.income_amount ? Number(object.income_amount.value) : undefined;
 
-      // Calculate real commission from actual YooKassa data
       const updateData: Record<string, any> = {
         status: 'paid',
         paidAt: new Date(object.captured_at || new Date()),
@@ -432,13 +371,8 @@ export class PaymentService {
       }
 
       await payment.update(updateData);
-
-      // Attempt delivery
       await this.deliveryService.attemptDelivery(payment.id);
-
-      // Clear cache
-      const cacheKey = getCacheKey(payment.customerId, payment.productId);
-      paymentCache.delete(cacheKey);
+      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
 
       console.log(`YooKassa: payment ${payment.id} succeeded (external: ${externalId})`);
     } else if (event === 'payment.canceled' && payment.status === 'pending') {
@@ -451,13 +385,11 @@ export class PaymentService {
         },
       });
 
-      // Clear cache
-      const cacheKey = getCacheKey(payment.customerId, payment.productId);
-      paymentCache.delete(cacheKey);
+      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
 
       console.log(`YooKassa: payment ${payment.id} canceled (external: ${externalId})`);
     } else if (event === 'payment.waiting_for_capture' && payment.status === 'pending') {
-      // Auto-capture: confirm the payment immediately
+      // Auto-capture: confirm immediately so the buyer's card is actually charged.
       const provider = await PaymentProvider.findOne({ where: { providerId: 'yookassa' } });
       if (provider) {
         const { shopId, secretKey } = provider.credentials;
@@ -469,17 +401,11 @@ export class PaymentService {
     }
   }
 
-  /**
-   * Handle Heleket webhook notification
-   * Success statuses: 'paid', 'paid_over'
-   * Fail statuses: 'cancel', 'fail', 'system_fail'
-   */
   async handleHeleketWebhook(payload: Record<string, any>): Promise<void> {
-    // Heleket uses order_id = our payment.id
+    // Heleket uses order_id = our payment.id; fall back to externalPaymentId.
     const paymentId = payload.order_id || payload.uuid;
     if (!paymentId) return;
 
-    // Try by order_id first (our payment ID), fallback to externalPaymentId
     let payment = await Payment.findByPk(paymentId, {
       include: [{ model: Customer, required: false }],
     });
@@ -498,7 +424,6 @@ export class PaymentService {
     const isFinal = payload.is_final;
 
     if ((status === 'paid' || status === 'paid_over') && (payment.status === 'pending' || payment.status === 'expired')) {
-      // Payment succeeded — update with real amounts from Heleket
       const paidAmount = payload.payment_amount ? Number(payload.payment_amount) : Number(payment.totalAmount);
       const merchantAmount = payload.merchant_amount ? Number(payload.merchant_amount) : undefined;
       const commission = payload.commission ? Number(payload.commission) : undefined;
@@ -517,7 +442,6 @@ export class PaymentService {
           : 0;
       }
 
-      // Store crypto-specific data in meta
       updateData.meta = {
         ...payment.meta,
         heleket: {
@@ -530,13 +454,8 @@ export class PaymentService {
       };
 
       await payment.update(updateData);
-
-      // Attempt delivery
       await this.deliveryService.attemptDelivery(payment.id);
-
-      // Clear cache
-      const cacheKey = getCacheKey(payment.customerId, payment.productId);
-      paymentCache.delete(cacheKey);
+      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
 
       console.log(`Heleket: payment ${payment.id} succeeded (uuid: ${payload.uuid}, txid: ${payload.txid})`);
 
@@ -553,25 +472,17 @@ export class PaymentService {
         },
       });
 
-      const cacheKey = getCacheKey(payment.customerId, payment.productId);
-      paymentCache.delete(cacheKey);
+      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
 
       console.log(`Heleket: payment ${payment.id} failed with status ${status} (uuid: ${payload.uuid})`);
     }
   }
 
-  /**
-   * Handle Wata webhook notification.
-   * Wata posts the full transaction payload; we care about `Paid` / `Declined`
-   * in the `transactionStatus` field (pre-payment webhooks without that field
-   * are acknowledged and ignored).
-   */
   async handleWataWebhook(payload: WataWebhookPayload): Promise<void> {
-    // Wata puts our internal payment id into `orderId`; fall back to the
-    // Wata ids (paymentLinkId / transactionId) if it's missing.
+    // Wata pre-payment notifications may arrive without a transactionStatus —
+    // safe to ignore until the post-payment one lands.
     const status = payload.transactionStatus || payload.status;
     if (!status) {
-      // Pre-payment notification — nothing to process
       return;
     }
 
@@ -603,12 +514,12 @@ export class PaymentService {
     if (status === 'Paid' && (payment.status === 'pending' || payment.status === 'expired')) {
       const paidAmount = payload.amount !== undefined ? Number(payload.amount) : Number(payment.totalAmount);
 
+      // Wata webhooks don't carry commission — keep our pre-charge estimate.
       await payment.update({
         status: 'paid',
         paidAt: payload.paymentTime ? new Date(payload.paymentTime) : new Date(),
         totalAmount: paidAmount,
         currency: payload.currency || payment.currency,
-        // Wata webhooks don't carry commission — keep the estimate we already stored.
         externalPaymentId: payload.transactionId || payment.externalPaymentId,
         meta: {
           ...payment.meta,
@@ -620,12 +531,8 @@ export class PaymentService {
         },
       });
 
-      // Attempt delivery
       await this.deliveryService.attemptDelivery(payment.id);
-
-      // Clear cache
-      const cacheKey = getCacheKey(payment.customerId, payment.productId);
-      paymentCache.delete(cacheKey);
+      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
 
       console.log(`Wata: payment ${payment.id} succeeded (tx: ${payload.transactionId})`);
     } else if (status === 'Declined' && payment.status === 'pending') {
@@ -643,23 +550,19 @@ export class PaymentService {
         },
       });
 
-      const cacheKey = getCacheKey(payment.customerId, payment.productId);
-      paymentCache.delete(cacheKey);
+      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
 
       console.log(`Wata: payment ${payment.id} declined (${payload.errorCode || 'unknown'})`);
     }
   }
 
-  /**
-   * Called by webhook or admin to manually confirm a payment
-   */
   async confirmPayment(paymentId: string): Promise<PaymentDto> {
     const payment = await Payment.findByPk(paymentId, {
       include: [{ model: Customer, required: false }],
     });
     if (!payment) throw new NotFoundError('Payment not found');
-    // Allow admin to manually rescue an auto-expired payment too — useful
-    // when the webhook arrived late or the buyer paid offline.
+    // Allow rescuing an auto-expired payment too — useful when webhook
+    // arrived late or buyer paid offline.
     if (payment.status !== 'pending' && payment.status !== 'expired') {
       throw new ValidationError('Payment is not pending');
     }
@@ -669,15 +572,10 @@ export class PaymentService {
       paidAt: new Date(),
     });
 
-    // Attempt delivery (RCON with retries)
     await this.deliveryService.attemptDelivery(payment.id);
-
-    // Reload to get updated status
     await payment.reload();
 
-    // Clear cache
-    const cacheKey = getCacheKey(payment.customerId, payment.productId);
-    paymentCache.delete(cacheKey);
+    paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
 
     return toDto(payment);
   }
@@ -718,8 +616,8 @@ export class PaymentService {
     });
     if (!payment) return null;
 
-    // Lazy-expire on read so the user-visible status flips the moment the
-    // /payments/:id/status poll picks it up — don't wait for the sweeper.
+    // Lazy-expire on read so /payments/:id/status flips immediately without
+    // waiting for the sweeper.
     if (this.expirationService.isStale(payment)) {
       await payment.update({ status: 'expired' });
     }
@@ -736,7 +634,6 @@ export class PaymentService {
     return payments.map(toDto);
   }
 
-  /** Stats for dashboard */
   async getStats(): Promise<{
     revenueByCurrency: { currency: string; total: number; commission: number; provider: number }[];
     totalPayments: number;
@@ -783,13 +680,10 @@ export class PaymentService {
     };
   }
 
-  /**
-   * Revenue chart grouped by period. All payments in the date range
-   * contribute regardless of their original currency — each row's amount is
-   * converted in SQL into the requested `currency` (or, if none is given,
-   * the admin's configured base currency). Unsupported codes also fall back
-   * to base, so a stale frontend can't break the chart.
-   */
+  // Cross-currency revenue chart: each row's amount is converted in SQL to
+  // the target currency (via admin currency_rates), so the DB returns one
+  // comparable number per bucket. Falls back to base currency when the
+  // requested code is unsupported.
   async getRevenueChart(options: {
     from: string;
     to: string;

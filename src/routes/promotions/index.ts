@@ -1,5 +1,6 @@
 import { type FastifyPluginAsync } from 'fastify';
 import { PromotionService } from '@/services/promotion.service';
+import type { CreatePromotionDto, UpdatePromotionDto } from '@/types';
 
 const promotionBodySchema = {
   type: 'object' as const,
@@ -15,27 +16,17 @@ const promotionBodySchema = {
 const promotionRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PromotionService();
 
-  // GET /promotions — admin only
   fastify.get('/', { onRequest: [fastify.authenticate] }, async () => {
     return service.findAll();
   });
 
-  // GET /promotions/:id — admin only
   fastify.get<{ Params: { id: string } }>('/:id', {
     onRequest: [fastify.authenticate],
   }, async (request) => {
     return service.findById(request.params.id);
   });
 
-  fastify.post<{
-    Body: {
-      name: string;
-      discountPercent: number;
-      startsAt: string;
-      endsAt: string;
-      productIds?: string[];
-    };
-  }>('/', {
+  fastify.post<{ Body: CreatePromotionDto & { startsAt: string; endsAt: string } }>('/', {
     onRequest: [fastify.authenticate],
     schema: {
       body: {
@@ -56,13 +47,7 @@ const promotionRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
   fastify.put<{
     Params: { id: string };
-    Body: {
-      name?: string;
-      discountPercent?: number;
-      startsAt?: string;
-      endsAt?: string;
-      productIds?: string[];
-    };
+    Body: UpdatePromotionDto;
   }>('/:id', {
     onRequest: [fastify.authenticate],
     schema: { body: promotionBodySchema },

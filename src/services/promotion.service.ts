@@ -2,43 +2,12 @@ import { Op } from 'sequelize';
 import { Promotion } from '@/models/promotion.model';
 import { Product } from '@/models/product.model';
 import { NotFoundError, ValidationError } from '@/core';
-
-export interface PromotionDto {
-  id: string;
-  name: string;
-  discountPercent: number;
-  startsAt: string;
-  endsAt: string;
-  productIds: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreatePromotionDto {
-  name: string;
-  discountPercent: number;
-  startsAt: string | Date;
-  endsAt: string | Date;
-  productIds: string[];
-}
-
-export interface UpdatePromotionDto {
-  name?: string;
-  discountPercent?: number;
-  startsAt?: string | Date;
-  endsAt?: string | Date;
-  productIds?: string[];
-}
-
-/**
- * Compact public view of a promotion stamped onto every product card —
- * the shop only needs the human label and the percent for badge rendering.
- */
-export interface ProductPromotionDto {
-  id: string;
-  name: string;
-  discountPercent: number;
-}
+import type {
+  PromotionDto,
+  CreatePromotionDto,
+  UpdatePromotionDto,
+  ProductPromotionDto,
+} from '@/types';
 
 function toDto(p: Promotion): PromotionDto {
   return {
@@ -53,12 +22,9 @@ function toDto(p: Promotion): PromotionDto {
   };
 }
 
-/**
- * Filter `promotions` down to those active at `now` and shape them for the
- * shop. Used both at product-listing time (for the badge/struck-through
- * price) and at payment-creation time (for the actual charge amount), so
- * the displayed price and the charged price never drift apart.
- */
+// Used both at product-listing time (for the badge / struck-through price) and
+// at payment-creation time (for the actual charge). Keeping it one helper is
+// what guarantees displayed price === charged price.
 export function activePromotionsAt(
   promotions: Promotion[] | undefined,
   now: Date = new Date(),
@@ -73,26 +39,18 @@ export function activePromotionsAt(
     }));
 }
 
-/**
- * Sum of all active promo percents for a product, capped at 100.
- * Stacking is the explicit product requirement — `Math.min(sum, 100)`
- * keeps the math safe (no negative prices, no >100% nonsense).
- */
+// Stacking is the explicit product requirement; cap at 100 to keep the math
+// safe (no negative prices, no >100% nonsense).
 export function totalDiscountPercent(active: ProductPromotionDto[]): number {
   if (active.length === 0) return 0;
-  const sum = active.reduce((acc, p) => acc + p.discountPercent, 0);
-  return Math.min(sum, 100);
+  return Math.min(active.reduce((acc, p) => acc + p.discountPercent, 0), 100);
 }
 
-/**
- * Apply the stacked discount to a base price. Result is rounded to 2
- * decimals so it lines up with `DECIMAL(10, 2)` on the products table —
- * otherwise we'd accumulate float drift between display and charge.
- */
+// Round to 2 decimals to match `DECIMAL(10, 2)` on the products table —
+// otherwise float drift accumulates between display and charge.
 export function applyDiscount(price: number, percent: number): number {
   if (percent <= 0) return Math.round(price * 100) / 100;
-  const discounted = price * (1 - percent / 100);
-  return Math.max(0, Math.round(discounted * 100) / 100);
+  return Math.max(0, Math.round(price * (1 - percent / 100) * 100) / 100);
 }
 
 export class PromotionService {
@@ -105,8 +63,7 @@ export class PromotionService {
   }
 
   async findById(id: string): Promise<PromotionDto> {
-    const promotion = await this.loadOne(id);
-    return toDto(promotion);
+    return toDto(await this.loadOne(id));
   }
 
   async create(data: CreatePromotionDto): Promise<PromotionDto> {
