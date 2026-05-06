@@ -41,4 +41,13 @@ export const config = {
     returnUrl: process.env.PAYMENT_RETURN_URL || 'http://localhost:3002/payment/success',
     webhookBaseUrl: process.env.WEBHOOK_BASE_URL || 'http://localhost:3001',
   },
+
+  uploads: {
+    dir: process.env.UPLOADS_DIR || 'uploads',
+    maxFileSize: parseInt(process.env.UPLOADS_MAX_FILE_SIZE || '10485760', 10),
+    // When set, upload responses return absolute URLs built from this base —
+    // keeps DB-persisted URLs stable across reverse-proxy hops. Empty falls
+    // back to deriving from the incoming request (handy for local dev).
+    publicBaseUrl: process.env.BACKEND_PUBLIC_URL || '',
+  },
 } as const;

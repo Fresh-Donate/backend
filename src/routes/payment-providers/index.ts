@@ -1,17 +1,16 @@
 import { type FastifyPluginAsync } from 'fastify';
-import { PaymentProviderService, type UpdatePaymentProviderDto } from '@/services/payment-provider.service';
+import { PaymentProviderService } from '@/services/payment-provider.service';
+import type { UpdatePaymentProviderDto } from '@/types';
 
 const paymentProviderRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentProviderService();
 
-  // GET /payment-providers — admin only
   fastify.get('/', {
     onRequest: [fastify.authenticate],
   }, async () => {
     return service.findAll();
   });
 
-  // GET /payment-providers/:providerId — admin only
   fastify.get<{ Params: { providerId: string } }>('/:providerId', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
@@ -22,7 +21,6 @@ const paymentProviderRoutes: FastifyPluginAsync = async (fastify): Promise<void>
     return result;
   });
 
-  // PUT /payment-providers/:providerId — admin only
   fastify.put<{
     Params: { providerId: string };
     Body: UpdatePaymentProviderDto;
@@ -33,8 +31,9 @@ const paymentProviderRoutes: FastifyPluginAsync = async (fastify): Promise<void>
         type: 'object' as const,
         properties: {
           enabled: { type: 'boolean' as const },
+          testMode: { type: 'boolean' as const },
           credentials: { type: 'object' as const },
-          methods: { type: 'array' as const },
+          commissionPercent: { type: 'number' as const, minimum: 0, maximum: 100 },
           commissionRule: { type: 'object' as const },
         },
       },

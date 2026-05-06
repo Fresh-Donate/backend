@@ -4,14 +4,12 @@ import { PaymentService } from '@/services/payment.service';
 const statsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const paymentService = new PaymentService();
 
-  // GET /stats — admin only, dashboard stats
   fastify.get('/', {
     onRequest: [fastify.authenticate],
   }, async () => {
     return paymentService.getStats();
   });
 
-  // GET /stats/chart — admin only, revenue chart data
   fastify.get<{
     Querystring: { from: string; to: string; period?: string; currency?: string };
   }>('/chart', {

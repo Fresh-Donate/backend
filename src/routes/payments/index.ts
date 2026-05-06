@@ -7,13 +7,13 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentService();
   const deliveryService = new DeliveryService();
 
-  // POST /payments — public (shop creates payment)
   fastify.post<{
     Body: {
       productId: string;
       nickname: string;
       email: string;
       paymentOptionId: string;
+      count?: number;
     };
   }>('/', {
     schema: {
@@ -22,8 +22,16 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         required: ['productId', 'nickname', 'email', 'paymentOptionId'],
         properties: {
           productId: { type: 'string' as const },
-          nickname: { type: 'string' as const, minLength: 1, maxLength: 64 },
+          // Minecraft Java Edition username rules — 3..16 chars of [a-zA-Z0-9_].
+          // Mirrored in shop UI Zod schema; keep the two in sync.
+          nickname: {
+            type: 'string' as const,
+            minLength: 3,
+            maxLength: 16,
+            pattern: '^[a-zA-Z0-9_]+$',
+          },
           email: { type: 'string' as const, format: 'email', maxLength: 256 },
+          count: { type: 'number' as const, minimum: 1, maximum: 100000 },
           paymentOptionId: { type: 'string' as const },
         },
       },
@@ -33,7 +41,26 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return reply.code(201).send(payment);
   });
 
-  // GET /payments/:id/status — public, check payment status (for return page polling)
+  // Returns the unit price the buyer will actually be charged after promo +
+  // upgrade discounts, so the modal can show the real number before
+  // committing instead of the buyer discovering it on the YooKassa page.
+  fastify.post<{
+    Body: { productId: string; nickname?: string };
+  }>('/preview', {
+    schema: {
+      body: {
+        type: 'object' as const,
+        required: ['productId'],
+        properties: {
+          productId: { type: 'string' as const },
+          nickname: { type: 'string' as const, maxLength: 16 },
+        },
+      },
+    },
+  }, async (request) => {
+    return service.previewPrice(request.body.nickname || '', request.body.productId);
+  });
+
   fastify.get<{ Params: { id: string } }>('/:id/status', async (request, reply) => {
     const payment = await service.findById(request.params.id);
     if (!payment) return reply.code(404).send({ error: 'Payment not found' });
@@ -46,7 +73,6 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     };
   });
 
-  // GET /payments — admin only, list all payments
   fastify.get<{
     Querystring: {
       status?: PaymentStatus;
@@ -66,7 +92,6 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     });
   });
 
-  // GET /payments/:id — admin only
   fastify.get<{ Params: { id: string } }>('/:id', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
@@ -75,14 +100,12 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return payment;
   });
 
-  // POST /payments/:id/confirm — webhook / admin manual confirm
   fastify.post<{ Params: { id: string } }>('/:id/confirm', {
     onRequest: [fastify.authenticate],
   }, async (request) => {
     return service.confirmPayment(request.params.id);
   });
 
-  // POST /payments/:id/retry-delivery — admin manual retry delivery
   fastify.post<{ Params: { id: string } }>('/:id/retry-delivery', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {

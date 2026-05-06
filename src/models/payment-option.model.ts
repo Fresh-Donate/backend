@@ -12,7 +12,6 @@ interface PaymentOptionAttributes {
   name: string;
   icon: string;
   providerId: string;
-  methodId: string;
   sortOrder: number;
   enabled: boolean;
   createdAt: Date;
@@ -21,7 +20,7 @@ interface PaymentOptionAttributes {
 
 type PaymentOptionCreationAttributes = Optional<
   PaymentOptionAttributes,
-  'id' | 'methodId' | 'sortOrder' | 'enabled' | 'createdAt' | 'updatedAt'
+  'id' | 'sortOrder' | 'enabled' | 'createdAt' | 'updatedAt'
 >;
 
 @Table({ tableName: 'payment_options' })
@@ -34,10 +33,6 @@ export class PaymentOption extends BaseModel<PaymentOptionAttributes, PaymentOpt
 
   @Column(DataType.STRING(32))
   declare providerId: string;
-
-  @Default('')
-  @Column(DataType.STRING(64))
-  declare methodId: string;
 
   @Default(0)
   @Column(DataType.INTEGER)

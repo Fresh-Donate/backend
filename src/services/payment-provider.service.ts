@@ -1,34 +1,14 @@
-import { PaymentProvider, type PaymentMethodData, type CommissionRuleData } from '@/models/payment-provider.model';
+import { PaymentProvider } from '@/models/payment-provider.model';
 import { NotFoundError } from '@/core';
+import type { PaymentProviderDto, UpdatePaymentProviderDto } from '@/types';
 
-export interface PaymentProviderDto {
-  id: string;
-  providerId: string;
-  name: string;
-  description: string;
-  icon: string;
-  enabled: boolean;
-  credentials: Record<string, string>;
-  methods: PaymentMethodData[];
-  commissionRule: CommissionRuleData;
-  supportedCurrencies: string[];
-}
-
-export interface UpdatePaymentProviderDto {
-  enabled?: boolean;
-  credentials?: Record<string, string>;
-  methods?: PaymentMethodData[];
-  commissionRule?: CommissionRuleData;
-}
-
-/** Default provider definitions — seeded on first request */
 const DEFAULT_PROVIDERS: Array<{
   providerId: string;
   name: string;
   description: string;
   icon: string;
   credentials: Record<string, string>;
-  methods: PaymentMethodData[];
+  commissionPercent: number;
   supportedCurrencies: string[];
 }> = [
   {
@@ -37,14 +17,7 @@ const DEFAULT_PROVIDERS: Array<{
     description: 'Приём платежей для РФ: банковские карты, СБП, ЮMoney, SberPay, T-Pay',
     icon: 'i-lucide-credit-card',
     credentials: { shopId: '', secretKey: '' },
-    methods: [
-      { id: 'bank_card', name: 'Банковские карты', commission: 2.8, enabled: true },
-      { id: 'sbp', name: 'СБП', commission: 0.4, enabled: true },
-      { id: 'yoo_money', name: 'ЮMoney', commission: 3.0, enabled: true },
-      { id: 'sber_pay', name: 'SberPay', commission: 2.8, enabled: false },
-      { id: 't_pay', name: 'T-Pay', commission: 2.8, enabled: false },
-      { id: 'qiwi', name: 'QIWI', commission: 6.0, enabled: false },
-    ],
+    commissionPercent: 2.8,
     supportedCurrencies: ['RUB'],
   },
   {
@@ -53,15 +26,17 @@ const DEFAULT_PROVIDERS: Array<{
     description: 'Криптовалютные платежи: BTC, ETH, USDT и другие',
     icon: 'i-lucide-bitcoin',
     credentials: { apiKey: '', merchantId: '' },
-    methods: [
-      { id: 'btc', name: 'Bitcoin (BTC)', commission: 0.5, enabled: true },
-      { id: 'eth', name: 'Ethereum (ETH)', commission: 0.5, enabled: true },
-      { id: 'usdt_trc20', name: 'USDT (TRC-20)', commission: 0.5, enabled: true },
-      { id: 'usdt_erc20', name: 'USDT (ERC-20)', commission: 0.5, enabled: false },
-      { id: 'ltc', name: 'Litecoin (LTC)', commission: 0.5, enabled: false },
-      { id: 'trx', name: 'TRON (TRX)', commission: 0.5, enabled: false },
-    ],
+    commissionPercent: 0.5,
     supportedCurrencies: ['USD', 'EUR', 'RUB'],
+  },
+  {
+    providerId: 'wata',
+    name: 'Wata',
+    description: 'Приём платежей: банковские карты, СБП. Поддерживает песочницу.',
+    icon: 'i-lucide-wallet',
+    credentials: { apiKey: '' },
+    commissionPercent: 2.5,
+    supportedCurrencies: ['RUB', 'USD', 'EUR'],
   },
 ];
 
@@ -73,8 +48,9 @@ function toDto(p: PaymentProvider): PaymentProviderDto {
     description: p.description,
     icon: p.icon,
     enabled: p.enabled,
+    testMode: p.testMode,
     credentials: p.credentials,
-    methods: p.methods,
+    commissionPercent: Number(p.commissionPercent),
     commissionRule: p.commissionRule,
     supportedCurrencies: p.supportedCurrencies,
   };
@@ -83,18 +59,21 @@ function toDto(p: PaymentProvider): PaymentProviderDto {
 export class PaymentProviderService {
   private seeded = false;
 
-  /** Seed default providers if table is empty */
+  // Idempotent per-provider seed: missing providers are inserted, existing ones
+  // left alone. Lets new providers (e.g. wata after an upgrade) appear on an
+  // already-seeded installation without manual migration.
   private async seed(): Promise<void> {
     if (this.seeded) return;
 
-    const count = await PaymentProvider.count();
-    if (count === 0) {
-      for (const def of DEFAULT_PROVIDERS) {
-        await PaymentProvider.create({
-          ...def,
-          commissionRule: { mode: 'seller' },
-        });
-      }
+    const existing = await PaymentProvider.findAll({ attributes: ['providerId'] });
+    const existingIds = new Set(existing.map((p) => p.providerId));
+
+    for (const def of DEFAULT_PROVIDERS) {
+      if (existingIds.has(def.providerId)) continue;
+      await PaymentProvider.create({
+        ...def,
+        commissionRule: { mode: 'seller' },
+      });
     }
 
     this.seeded = true;

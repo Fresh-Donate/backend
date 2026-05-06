@@ -1,21 +1,22 @@
 import { type FastifyPluginAsync } from 'fastify';
-import { SettingsService, type SettingsDto } from '@/services/settings.service';
+import { SettingsService } from '@/services/settings.service';
+import type { SettingsDto } from '@/types';
 
 const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new SettingsService();
 
-  // GET /settings — admin only
   fastify.get('/', { onRequest: [fastify.authenticate] }, async () => {
     return service.get();
   });
 
-  // PUT /settings — admin only
   fastify.put<{
     Body: {
       demo_payments?: boolean;
       delivery_method?: string;
       rcon_config?: { host?: string; port?: number; password?: string };
       plugin_config?: { token?: string };
+      base_currency?: 'RUB' | 'USD' | 'EUR';
+      currency_rates?: Record<string, number>;
     };
   }>('/', {
     onRequest: [fastify.authenticate],
@@ -38,6 +39,13 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
             properties: {
               token: { type: 'string' as const, maxLength: 64 },
             },
+          },
+          // Switching the base resets the rate map to defaults — stale
+          // "X per old base" values can't survive the change.
+          base_currency: { type: 'string' as const, enum: ['RUB', 'USD', 'EUR'] },
+          currency_rates: {
+            type: 'object' as const,
+            additionalProperties: { type: 'number' as const, minimum: 0, maximum: 100000 },
           },
         },
       },

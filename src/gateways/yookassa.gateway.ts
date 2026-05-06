@@ -1,73 +1,14 @@
 import axios, { type AxiosInstance } from 'axios';
 import { randomUUID } from 'node:crypto';
 import { PaymentError } from '@/core/errors';
+import type {
+  YooKassaPayment,
+  YooKassaRefund,
+  CreateYooKassaPaymentParams,
+} from '@/types';
 
 const YOOKASSA_API_URL = 'https://api.yookassa.ru/v3';
 
-/**
- * YooKassa payment statuses
- * @see https://yookassa.ru/developers/api#payment_object_status
- */
-export type YooKassaPaymentStatus =
-  | 'pending'
-  | 'waiting_for_capture'
-  | 'succeeded'
-  | 'canceled';
-
-export interface YooKassaAmount {
-  value: string;
-  currency: string;
-}
-
-export interface YooKassaConfirmation {
-  type: string;
-  confirmation_url?: string;
-  return_url?: string;
-}
-
-export interface YooKassaPayment {
-  id: string;
-  status: YooKassaPaymentStatus;
-  amount: YooKassaAmount;
-  income_amount?: YooKassaAmount;
-  description?: string;
-  confirmation?: YooKassaConfirmation;
-  payment_method?: {
-    type: string;
-    id?: string;
-    saved?: boolean;
-    title?: string;
-  };
-  metadata?: Record<string, string>;
-  paid: boolean;
-  refundable: boolean;
-  created_at: string;
-  captured_at?: string;
-  expires_at?: string;
-}
-
-export interface YooKassaRefund {
-  id: string;
-  status: 'succeeded' | 'canceled';
-  amount: YooKassaAmount;
-  payment_id: string;
-  created_at: string;
-}
-
-export interface CreateYooKassaPaymentParams {
-  amount: number;
-  currency: string;
-  description: string;
-  returnUrl: string;
-  paymentMethodType?: string;
-  metadata?: Record<string, string>;
-  capture?: boolean;
-}
-
-/**
- * YooKassa API Gateway
- * @see https://yookassa.ru/developers/api
- */
 export class YooKassaGateway {
   private client: AxiosInstance;
 
@@ -80,10 +21,6 @@ export class YooKassaGateway {
     });
   }
 
-  /**
-   * Create a payment
-   * @see https://yookassa.ru/developers/api#create_payment
-   */
   async createPayment(params: CreateYooKassaPaymentParams): Promise<YooKassaPayment> {
     const idempotencyKey = randomUUID();
 
@@ -118,10 +55,6 @@ export class YooKassaGateway {
     }
   }
 
-  /**
-   * Get payment details
-   * @see https://yookassa.ru/developers/api#get_payment
-   */
   async getPayment(paymentId: string): Promise<YooKassaPayment> {
     try {
       const { data } = await this.client.get<YooKassaPayment>(`/payments/${paymentId}`);
@@ -132,22 +65,14 @@ export class YooKassaGateway {
     }
   }
 
-  /**
-   * Capture a payment (if capture=false was used during creation)
-   * @see https://yookassa.ru/developers/api#capture_payment
-   */
   async capturePayment(paymentId: string, amount: number, currency: string): Promise<YooKassaPayment> {
     const idempotencyKey = randomUUID();
 
     try {
       const { data } = await this.client.post<YooKassaPayment>(
         `/payments/${paymentId}/capture`,
-        {
-          amount: { value: amount.toFixed(2), currency },
-        },
-        {
-          headers: { 'Idempotence-Key': idempotencyKey },
-        },
+        { amount: { value: amount.toFixed(2), currency } },
+        { headers: { 'Idempotence-Key': idempotencyKey } },
       );
       return data;
     } catch (error: any) {
@@ -156,10 +81,6 @@ export class YooKassaGateway {
     }
   }
 
-  /**
-   * Create a refund
-   * @see https://yookassa.ru/developers/api#create_refund
-   */
   async createRefund(paymentId: string, amount: number, currency: string): Promise<YooKassaRefund> {
     const idempotencyKey = randomUUID();
 
@@ -170,9 +91,7 @@ export class YooKassaGateway {
           payment_id: paymentId,
           amount: { value: amount.toFixed(2), currency },
         },
-        {
-          headers: { 'Idempotence-Key': idempotencyKey },
-        },
+        { headers: { 'Idempotence-Key': idempotencyKey } },
       );
       return data;
     } catch (error: any) {
@@ -181,11 +100,8 @@ export class YooKassaGateway {
     }
   }
 
-  /**
-   * Validate webhook notification signature (IP-based)
-   * YooKassa sends notifications from specific IPs:
-   * @see https://yookassa.ru/developers/using-api/webhooks
-   */
+  // YooKassa webhooks come from a fixed set of IPs (no signing) —
+  // see https://yookassa.ru/developers/using-api/webhooks
   static isValidWebhookIp(ip: string): boolean {
     const allowedCidrs = [
       '185.71.76.',

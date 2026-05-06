@@ -1,23 +1,10 @@
 import { Customer } from '@/models/customer.model';
 import { Payment } from '@/models/payment.model';
 import { Op, fn, col, literal } from 'sequelize';
+import { SettingsService } from './settings.service';
+import { buildAmountInBaseSql } from '@/utils/currency';
+import type { CustomerDto, CustomerCurrencyStats } from '@/types';
 
-export interface CustomerCurrencyStats {
-  currency: string;
-  totalSpent: number;
-  purchaseCount: number;
-}
-
-export interface CustomerDto {
-  id: string;
-  nickname: string;
-  email: string;
-  stats: CustomerCurrencyStats[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-// Учитываются только успешные платежи
 const COUNTED_STATUSES = ['paid', 'delivered'];
 
 function toDto(c: Customer, stats: CustomerCurrencyStats[]): CustomerDto {
@@ -68,6 +55,8 @@ async function aggregateStatsForCustomers(customerIds: string[]): Promise<Map<st
 }
 
 export class CustomerService {
+  private settingsService = new SettingsService();
+
   async findOrCreate(nickname: string, email: string): Promise<CustomerDto> {
     let customer = await Customer.findOne({
       where: { [Op.or]: [{ nickname }, { email }] },
@@ -85,7 +74,13 @@ export class CustomerService {
     return toDto(customer, statsMap.get(customer.id) ?? []);
   }
 
-  async findAll(options?: { search?: string; limit?: number; offset?: number }): Promise<{ items: CustomerDto[]; total: number }> {
+  async findAll(options?: {
+    search?: string;
+    limit?: number;
+    offset?: number;
+    sortBy?: 'nickname' | 'email' | 'createdAt' | 'purchaseCount' | 'totalSpent';
+    sortOrder?: 'asc' | 'desc';
+  }): Promise<{ items: CustomerDto[]; total: number }> {
     const where: any = {};
     if (options?.search) {
       where[Op.or] = [
@@ -94,9 +89,49 @@ export class CustomerService {
       ];
     }
 
+    const sortBy = options?.sortBy ?? 'createdAt';
+    const sortDirection = options?.sortOrder === 'asc' ? 'ASC' : 'DESC';
+
+    // Aggregate sort columns (purchaseCount/totalSpent) are computed via
+    // correlated subqueries on the fly. totalSpent normalises into the
+    // admin's base currency so cross-currency sums are comparable.
+    let order: any[];
+    if (sortBy === 'purchaseCount') {
+      order = [
+        [
+          literal(
+            `(SELECT COUNT(*) FROM payments WHERE payments.customer_id = "Customer"."id" AND payments.status IN ('paid', 'delivered'))`,
+          ),
+          sortDirection,
+        ],
+        ['created_at', 'DESC'],
+      ];
+    } else if (sortBy === 'totalSpent') {
+      const settings = await this.settingsService.get();
+      const amountInBase = buildAmountInBaseSql(
+        settings.currency_rates,
+        settings.base_currency,
+        'payments.total_amount',
+        'payments.currency',
+      );
+      order = [
+        [
+          literal(
+            `(SELECT COALESCE(SUM(${amountInBase}), 0) FROM payments WHERE payments.customer_id = "Customer"."id" AND payments.status IN ('paid', 'delivered'))`,
+          ),
+          sortDirection,
+        ],
+        ['created_at', 'DESC'],
+      ];
+    } else if (sortBy === 'createdAt') {
+      order = [['created_at', sortDirection]];
+    } else {
+      order = [[sortBy, sortDirection], ['created_at', 'DESC']];
+    }
+
     const { rows, count } = await Customer.findAndCountAll({
       where,
-      order: [['created_at', 'DESC']],
+      order,
       limit: options?.limit || 50,
       offset: options?.offset || 0,
     });

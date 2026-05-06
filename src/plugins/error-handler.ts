@@ -15,7 +15,6 @@ export default fp(async (fastify) => {
       });
     }
 
-    // Fastify validation errors
     if (error.validation) {
       return reply.code(400).send({
         error: 'ValidationError',
@@ -24,7 +23,6 @@ export default fp(async (fastify) => {
       });
     }
 
-    // Unexpected errors
     request.log.error(error);
     return reply.code(error.statusCode || 500).send({
       error: 'InternalServerError',

@@ -3,9 +3,14 @@ import {
   Column,
   DataType,
   Default,
+  BelongsToMany,
 } from 'sequelize-typescript';
 import { Optional } from 'sequelize';
 import { BaseModel } from './base.model';
+import { Promotion } from './promotion.model';
+import { PromotionProduct } from './promotion-product.model';
+import { Group } from './group.model';
+import { GroupProduct } from './group-product.model';
 
 interface ProductAttributes {
   id: string;
@@ -17,11 +22,12 @@ interface ProductAttributes {
   type: string;
   commands: string[];
   imageUrl: string;
+  allowCustomCount: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
-type ProductCreationAttributes = Optional<ProductAttributes, 'id' | 'description' | 'commands' | 'imageUrl' | 'createdAt' | 'updatedAt'>;
+type ProductCreationAttributes = Optional<ProductAttributes, 'id' | 'description' | 'commands' | 'imageUrl' | 'allowCustomCount' | 'createdAt' | 'updatedAt'>;
 
 @Table({ tableName: 'products' })
 export class Product extends BaseModel<ProductAttributes, ProductCreationAttributes> {
@@ -53,4 +59,14 @@ export class Product extends BaseModel<ProductAttributes, ProductCreationAttribu
   @Default('')
   @Column(DataType.STRING(512))
   declare imageUrl: string;
+
+  @Default(false)
+  @Column(DataType.BOOLEAN)
+  declare allowCustomCount: boolean;
+
+  @BelongsToMany(() => Promotion, () => PromotionProduct)
+  declare promotions: Promotion[];
+
+  @BelongsToMany(() => Group, () => GroupProduct)
+  declare groups: Group[];
 }
