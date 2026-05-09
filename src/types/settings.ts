@@ -14,4 +14,6 @@ export interface SettingsDto {
   };
   base_currency: SupportedCurrency;
   currency_rates: CurrencyRates;
+  telemetry_enabled: boolean;
+  installation_id: string;
 }

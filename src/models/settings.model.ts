@@ -28,13 +28,15 @@ interface SettingsAttributes {
   plugin_config: PluginConfig;
   base_currency: SupportedCurrency;
   currency_rates: CurrencyRates;
+  telemetry_enabled: boolean;
+  installation_id: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
 type SettingsCreationAttributes = Optional<
   SettingsAttributes,
-  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'base_currency' | 'currency_rates' | 'createdAt' | 'updatedAt'
+  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'base_currency' | 'currency_rates' | 'telemetry_enabled' | 'installation_id' | 'createdAt' | 'updatedAt'
 >;
 
 @Table({ tableName: 'settings' })
@@ -62,4 +64,12 @@ export class Settings extends BaseModel<SettingsAttributes, SettingsCreationAttr
   @Default({ USD: 95, EUR: 100 })
   @Column(DataType.JSONB)
   declare currency_rates: CurrencyRates;
+
+  @Default(true)
+  @Column(DataType.BOOLEAN)
+  declare telemetry_enabled: boolean;
+
+  @Default('')
+  @Column(DataType.STRING(64))
+  declare installation_id: string;
 }
