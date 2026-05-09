@@ -45,9 +45,12 @@ export const config = {
   uploads: {
     dir: process.env.UPLOADS_DIR || 'uploads',
     maxFileSize: parseInt(process.env.UPLOADS_MAX_FILE_SIZE || '10485760', 10),
-    // When set, upload responses return absolute URLs built from this base —
-    // keeps DB-persisted URLs stable across reverse-proxy hops. Empty falls
-    // back to deriving from the incoming request (handy for local dev).
     publicBaseUrl: process.env.BACKEND_PUBLIC_URL || '',
+  },
+
+  telemetry: {
+    host: process.env.APTABASE_HOST || 'https://telemetry.fd.zaralx.ru',
+    appKey: process.env.APTABASE_APP_KEY || 'A-SH-9656128816',
+    disabled: process.env.APTABASE_DISABLED === 'true' || process.env.SKIP_TELEMETRY === 'true',
   },
 } as const;

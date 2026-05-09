@@ -17,6 +17,7 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       plugin_config?: { token?: string };
       base_currency?: 'RUB' | 'USD' | 'EUR';
       currency_rates?: Record<string, number>;
+      telemetry_enabled?: boolean;
     };
   }>('/', {
     onRequest: [fastify.authenticate],
@@ -40,18 +41,24 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
               token: { type: 'string' as const, maxLength: 64 },
             },
           },
-          // Switching the base resets the rate map to defaults — stale
-          // "X per old base" values can't survive the change.
           base_currency: { type: 'string' as const, enum: ['RUB', 'USD', 'EUR'] },
           currency_rates: {
             type: 'object' as const,
             additionalProperties: { type: 'number' as const, minimum: 0, maximum: 100000 },
           },
+          telemetry_enabled: { type: 'boolean' as const },
         },
       },
     },
   }, async (request) => {
-    return service.update(request.body as Partial<SettingsDto>);
+    const before = await service.get();
+    const after = await service.update(request.body as Partial<SettingsDto>);
+
+    if (before.telemetry_enabled !== after.telemetry_enabled) {
+      await fastify.telemetry?.onToggle(after.telemetry_enabled);
+    }
+
+    return after;
   });
 };
 

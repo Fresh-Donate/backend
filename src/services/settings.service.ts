@@ -14,6 +14,10 @@ function generateToken(): string {
   return crypto.randomBytes(32).toString('hex').slice(0, 32);
 }
 
+function generateInstallationId(): string {
+  return crypto.randomUUID();
+}
+
 // Drop unsupported codes / non-positive numbers / the base currency itself.
 // Mirrors the panel's fixed RUB/USD/EUR allow-list — silently ignoring stale
 // keys keeps a partial PUT from a stale client from failing.
@@ -57,6 +61,8 @@ function toDto(s: Settings): SettingsDto {
     plugin_config: s.plugin_config,
     base_currency: base,
     currency_rates: fillRatesForBase(s.currency_rates, base),
+    telemetry_enabled: s.telemetry_enabled ?? true,
+    installation_id: s.installation_id,
   };
 }
 
@@ -71,8 +77,14 @@ export class SettingsService {
         plugin_config: { token: generateToken() },
         base_currency: DEFAULT_BASE_CURRENCY,
         currency_rates: defaultRatesFor(DEFAULT_BASE_CURRENCY),
+        telemetry_enabled: true,
+        installation_id: generateInstallationId(),
       },
     });
+
+    if (!settings.installation_id) {
+      await settings.update({ installation_id: generateInstallationId() });
+    }
 
     return toDto(settings);
   }
@@ -87,8 +99,14 @@ export class SettingsService {
         plugin_config: { token: generateToken() },
         base_currency: DEFAULT_BASE_CURRENCY,
         currency_rates: defaultRatesFor(DEFAULT_BASE_CURRENCY),
+        telemetry_enabled: true,
+        installation_id: generateInstallationId(),
       },
     });
+
+    if (!settings.installation_id) {
+      await settings.update({ installation_id: generateInstallationId() });
+    }
 
     const currentBase: SupportedCurrency = isSupportedCurrency(settings.base_currency)
       ? settings.base_currency
@@ -109,6 +127,8 @@ export class SettingsService {
       base_currency: nextBase,
       currency_rates: nextRates,
     };
+
+    delete patch.installation_id;
 
     await settings.update(patch);
 
