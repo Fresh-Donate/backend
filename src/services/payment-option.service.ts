@@ -12,6 +12,7 @@ function toDto(o: PaymentOption): PaymentOptionDto {
     name: o.name,
     icon: o.icon,
     providerId: o.providerId,
+    redirectUrl: o.redirectUrl,
     sortOrder: o.sortOrder,
     enabled: o.enabled,
   };
