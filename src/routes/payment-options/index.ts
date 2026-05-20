@@ -20,11 +20,12 @@ const paymentOptionRoutes: FastifyPluginAsync = async (fastify): Promise<void> =
     schema: {
       body: {
         type: 'object' as const,
-        required: ['name', 'icon', 'providerId'],
+        required: ['name', 'icon'],
         properties: {
           name: { type: 'string' as const, minLength: 1, maxLength: 128 },
           icon: { type: 'string' as const, minLength: 1, maxLength: 128 },
-          providerId: { type: 'string' as const, minLength: 1, maxLength: 32 },
+          providerId: { type: 'string' as const, maxLength: 32 },
+          redirectUrl: { type: ['string', 'null'] as const, maxLength: 1024 },
           sortOrder: { type: 'integer' as const, minimum: 0 },
           enabled: { type: 'boolean' as const },
         },
@@ -46,7 +47,8 @@ const paymentOptionRoutes: FastifyPluginAsync = async (fastify): Promise<void> =
         properties: {
           name: { type: 'string' as const, minLength: 1, maxLength: 128 },
           icon: { type: 'string' as const, minLength: 1, maxLength: 128 },
-          providerId: { type: 'string' as const, minLength: 1, maxLength: 32 },
+          providerId: { type: 'string' as const, maxLength: 32 },
+          redirectUrl: { type: ['string', 'null'] as const, maxLength: 1024 },
           sortOrder: { type: 'integer' as const, minimum: 0 },
           enabled: { type: 'boolean' as const },
         },

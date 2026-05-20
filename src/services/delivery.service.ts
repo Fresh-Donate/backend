@@ -3,6 +3,7 @@ import { Product } from '@/models/product.model';
 import { Customer } from '@/models/customer.model';
 import { RconService } from './rcon.service';
 import { SettingsService } from './settings.service';
+import { buildCommandVariables } from '@/utils/command-variables';
 import type { DeliveryLog } from '@/types';
 
 const RETRY_DELAYS = [
@@ -51,11 +52,10 @@ export class DeliveryService {
     const attempt = logs.length + 1;
 
     try {
-      const results = await this.rconService.executeCommands(commands, {
-        player: payment.customer?.nickname || '',
-        amount: String(product.quantity * payment.userSelectedCount),
-        product: product.name,
-      });
+      const results = await this.rconService.executeCommands(
+        commands,
+        buildCommandVariables(payment, product),
+      );
 
       const allSucceeded = results.every((r) => r.success);
 

@@ -3,6 +3,7 @@ import { Payment } from '@/models/payment.model';
 import { Product } from '@/models/product.model';
 import { Customer } from '@/models/customer.model';
 import { SettingsService } from '@/services/settings.service';
+import { buildCommandVariables, resolveCommandVariables } from '@/utils/command-variables';
 
 const settingsService = new SettingsService();
 
@@ -48,12 +49,15 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       const product = await Product.findByPk(payment.productId);
       if (!product) continue;
 
-      const commands = product.commands || [];
-      if (commands.length === 0) continue;
+      const rawCommands = product.commands || [];
+      if (rawCommands.length === 0) continue;
+
+      const variables = buildCommandVariables(payment, product);
+      const commands = rawCommands.map((cmd) => resolveCommandVariables(cmd, variables));
 
       result.push({
         paymentId: payment.id,
-        playerNickname: payment.customer?.nickname || '',
+        playerNickname: variables.player,
         productName: payment.productName,
         commands,
         requireOnline: true,
