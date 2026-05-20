@@ -1,5 +1,6 @@
 import { Rcon } from 'rcon-client';
 import { SettingsService } from './settings.service';
+import { resolveCommandVariables, type CommandVariables } from '@/utils/command-variables';
 import type { RconResult } from '@/types';
 
 export class RconService {
@@ -14,7 +15,7 @@ export class RconService {
 
   async executeCommands(
     commands: string[],
-    variables: Record<string, string>,
+    variables: CommandVariables,
   ): Promise<RconResult[]> {
     const settings = await this.settingsService.get();
 
@@ -34,7 +35,7 @@ export class RconService {
 
       const results: RconResult[] = [];
       for (const raw of commands) {
-        const command = this.resolveVariables(raw, variables);
+        const command = resolveCommandVariables(raw, variables);
         try {
           const response = await rcon.send(command);
           results.push({ command, response, success: true });
@@ -51,13 +52,5 @@ export class RconService {
     } finally {
       void rcon.end();
     }
-  }
-
-  private resolveVariables(command: string, variables: Record<string, string>): string {
-    let result = command;
-    for (const [key, value] of Object.entries(variables)) {
-      result = result.replaceAll(`{${key}}`, value);
-    }
-    return result;
   }
 }
