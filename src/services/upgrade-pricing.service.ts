@@ -63,9 +63,6 @@ export class UpgradePricingService {
       const groupProductIds = await this.productIdsInGroup(group.id);
       if (groupProductIds.length === 0) continue;
 
-      // Don't exclude the target product itself — the "<=" branch below
-      // catches "buying the same rank again" and blocks it cleanly, which
-      // is preferable to letting it through with discount = full price.
       const lastPayment = await Payment.findOne({
         where: {
           status: { [Op.in]: ['paid', 'delivered'] },
@@ -76,7 +73,6 @@ export class UpgradePricingService {
       });
       if (!lastPayment) continue;
 
-      // Prior product may have been deleted between purchase and now.
       const prior = await Product.findByPk(lastPayment.productId, {
         include: [{ model: Promotion, through: { attributes: [] as string[] }, required: false }],
       });
@@ -100,8 +96,6 @@ export class UpgradePricingService {
         if (!reference || refRounded > reference.referencePrice) {
           reference = { productId: prior.id, productName: prior.name, referencePrice: refRounded };
         }
-        // Keep scanning so `reference` ends up pointing at the most expensive
-        // blocking rank when several groups would all block.
         continue;
       }
 
