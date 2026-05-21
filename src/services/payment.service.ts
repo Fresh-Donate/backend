@@ -1,5 +1,4 @@
 import { Payment, type PaymentStatus } from '@/models/payment.model';
-import { Customer } from '@/models/customer.model';
 import { Product } from '@/models/product.model';
 import { Promotion } from '@/models/promotion.model';
 import { Group } from '@/models/group.model';
@@ -32,9 +31,8 @@ import type {
 function toDto(p: Payment): PaymentDto {
   return {
     id: p.id,
-    customerId: p.customerId,
-    customerNickname: p.customer?.nickname,
-    customerEmail: p.customer?.email,
+    customerNickname: p.customerNickname,
+    customerEmail: p.customerEmail,
     productId: p.productId,
     productName: p.productName,
     productPrice: Number(p.productPrice),
@@ -59,13 +57,13 @@ function toDto(p: Payment): PaymentDto {
   };
 }
 
-// Idempotency cache: same (customer, product, count) request within 2 min
+// Idempotency cache: same (nickname, product, count) request within 2 min
 // returns the existing pending payment instead of double-charging.
 const paymentCache = new Map<string, { paymentId: string; expiresAt: number }>();
 const CACHE_TTL = 2 * 60 * 1000;
 
-function getCacheKey(customerId: string, productId: string): string {
-  return `${customerId}:${productId}`;
+function getCacheKey(nickname: string, productKey: string): string {
+  return `${nickname}:${productKey}`;
 }
 
 export class PaymentService {
@@ -103,14 +101,10 @@ export class PaymentService {
       throw new ValidationError('This product does not support custom count');
     }
 
-    const customer = await this.customerService.findOrCreate(data.nickname, data.email);
-
-    const cacheKey = getCacheKey(customer.id, `${data.productId}_${count}`);
+    const cacheKey = getCacheKey(data.nickname, `${data.productId}_${count}`);
     const cached = paymentCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
-      const existing = await Payment.findByPk(cached.paymentId, {
-        include: [{ model: Customer, required: false }],
-      });
+      const existing = await Payment.findByPk(cached.paymentId);
       if (existing && existing.status === 'pending') {
         return toDto(existing);
       }
@@ -169,8 +163,6 @@ export class PaymentService {
           : provider.supportedCurrencies[0];
       }
 
-      // Per-provider default commission — overwritten by webhook data once the
-      // payment completes (real fee from provider receipt).
       commissionPercent = Number(provider.commissionPercent) || 0;
       commissionAmount = Math.round(productPrice * commissionPercent) / 100;
 
@@ -189,7 +181,8 @@ export class PaymentService {
     }
 
     const payment = await Payment.create({
-      customerId: customer.id,
+      customerNickname: data.nickname,
+      customerEmail: data.email,
       productId: product.id,
       productName: product.name,
       productPrice,
@@ -214,9 +207,7 @@ export class PaymentService {
 
       await this.deliveryService.attemptDelivery(payment.id);
 
-      const result = await Payment.findByPk(payment.id, {
-        include: [{ model: Customer, required: false }],
-      });
+      const result = await Payment.findByPk(payment.id);
       if (!result) throw new Error('Payment vanished after creation');
       return toDto(result);
     }
@@ -230,15 +221,11 @@ export class PaymentService {
       await this.createExternalPayment(payment, provider, product.name);
     }
 
-    const result = await Payment.findByPk(payment.id, {
-      include: [{ model: Customer, required: false }],
-    });
+    const result = await Payment.findByPk(payment.id);
     if (!result) throw new Error('Payment vanished after creation');
     return toDto(result);
   }
 
-  // We don't force a payment method on any provider — the buyer picks
-  // (card / SBP / crypto / …) on the provider's own checkout.
   private async createExternalPayment(
     payment: Payment,
     provider: InstanceType<typeof PaymentProvider>,
@@ -263,7 +250,7 @@ export class PaymentService {
         returnUrl: `${returnUrl}?paymentId=${payment.id}`,
         metadata: {
           payment_id: payment.id,
-          customer_id: payment.customerId,
+          customer_nickname: payment.customerNickname,
           product_id: payment.productId,
         },
       });
@@ -340,15 +327,12 @@ export class PaymentService {
 
     const payment = await Payment.findOne({
       where: { externalPaymentId: externalId },
-      include: [{ model: Customer, required: false }],
     });
     if (!payment) {
       console.warn(`YooKassa webhook: payment not found for external ID ${externalId}`);
       return;
     }
 
-    // Late webhooks may target a payment we already auto-expired. Honour the
-    // success transition — the user actually paid, deliver the goods.
     if (event === 'payment.succeeded' && (payment.status === 'pending' || payment.status === 'expired')) {
       const paidAmount = object.amount ? Number(object.amount.value) : Number(payment.totalAmount);
       const incomeAmount = object.income_amount ? Number(object.income_amount.value) : undefined;
@@ -372,7 +356,7 @@ export class PaymentService {
 
       await payment.update(updateData);
       await this.deliveryService.attemptDelivery(payment.id);
-      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
+      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
       console.log(`YooKassa: payment ${payment.id} succeeded (external: ${externalId})`);
     } else if (event === 'payment.canceled' && payment.status === 'pending') {
@@ -385,7 +369,7 @@ export class PaymentService {
         },
       });
 
-      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
+      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
       console.log(`YooKassa: payment ${payment.id} canceled (external: ${externalId})`);
     } else if (event === 'payment.waiting_for_capture' && payment.status === 'pending') {
@@ -406,13 +390,10 @@ export class PaymentService {
     const paymentId = payload.order_id || payload.uuid;
     if (!paymentId) return;
 
-    let payment = await Payment.findByPk(paymentId, {
-      include: [{ model: Customer, required: false }],
-    });
+    let payment = await Payment.findByPk(paymentId);
     if (!payment) {
       payment = await Payment.findOne({
         where: { externalPaymentId: payload.uuid },
-        include: [{ model: Customer, required: false }],
       });
     }
     if (!payment) {
@@ -455,7 +436,7 @@ export class PaymentService {
 
       await payment.update(updateData);
       await this.deliveryService.attemptDelivery(payment.id);
-      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
+      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
       console.log(`Heleket: payment ${payment.id} succeeded (uuid: ${payload.uuid}, txid: ${payload.txid})`);
 
@@ -472,7 +453,7 @@ export class PaymentService {
         },
       });
 
-      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
+      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
       console.log(`Heleket: payment ${payment.id} failed with status ${status} (uuid: ${payload.uuid})`);
     }
@@ -489,9 +470,7 @@ export class PaymentService {
     let payment: Payment | null = null;
 
     if (payload.orderId) {
-      payment = await Payment.findByPk(payload.orderId, {
-        include: [{ model: Customer, required: false }],
-      });
+      payment = await Payment.findByPk(payload.orderId);
     }
 
     if (!payment) {
@@ -499,7 +478,6 @@ export class PaymentService {
       if (externalIds.length > 0) {
         payment = await Payment.findOne({
           where: { externalPaymentId: { [Op.in]: externalIds } },
-          include: [{ model: Customer, required: false }],
         });
       }
     }
@@ -532,7 +510,7 @@ export class PaymentService {
       });
 
       await this.deliveryService.attemptDelivery(payment.id);
-      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
+      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
       console.log(`Wata: payment ${payment.id} succeeded (tx: ${payload.transactionId})`);
     } else if (status === 'Declined' && payment.status === 'pending') {
@@ -550,16 +528,14 @@ export class PaymentService {
         },
       });
 
-      paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
+      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
       console.log(`Wata: payment ${payment.id} declined (${payload.errorCode || 'unknown'})`);
     }
   }
 
   async confirmPayment(paymentId: string): Promise<PaymentDto> {
-    const payment = await Payment.findByPk(paymentId, {
-      include: [{ model: Customer, required: false }],
-    });
+    const payment = await Payment.findByPk(paymentId);
     if (!payment) throw new NotFoundError('Payment not found');
     // Allow rescuing an auto-expired payment too — useful when webhook
     // arrived late or buyer paid offline.
@@ -575,7 +551,7 @@ export class PaymentService {
     await this.deliveryService.attemptDelivery(payment.id);
     await payment.reload();
 
-    paymentCache.delete(getCacheKey(payment.customerId, payment.productId));
+    paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
     return toDto(payment);
   }
@@ -593,27 +569,23 @@ export class PaymentService {
     if (options?.search) {
       where[Op.or] = [
         { productName: { [Op.iLike]: `%${options.search}%` } },
-        { '$customer.nickname$': { [Op.iLike]: `%${options.search}%` } },
-        { '$customer.email$': { [Op.iLike]: `%${options.search}%` } },
+        { customerNickname: { [Op.iLike]: `%${options.search}%` } },
+        { customerEmail: { [Op.iLike]: `%${options.search}%` } },
       ];
     }
 
     const { rows, count } = await Payment.findAndCountAll({
       where,
-      include: [{ model: Customer, required: false }],
       order: [['created_at', 'DESC']],
       limit: options?.limit || 50,
       offset: options?.offset || 0,
-      subQuery: false,
     });
 
     return { items: rows.map(toDto), total: count };
   }
 
   async findById(id: string): Promise<PaymentDto | null> {
-    const payment = await Payment.findByPk(id, {
-      include: [{ model: Customer, required: false }],
-    });
+    const payment = await Payment.findByPk(id);
     if (!payment) return null;
 
     // Lazy-expire on read so /payments/:id/status flips immediately without
@@ -625,10 +597,9 @@ export class PaymentService {
     return toDto(payment);
   }
 
-  async findByCustomerId(customerId: string): Promise<PaymentDto[]> {
+  async findByNickname(nickname: string): Promise<PaymentDto[]> {
     const payments = await Payment.findAll({
-      where: { customerId },
-      include: [{ model: Customer, required: false }],
+      where: { customerNickname: nickname },
       order: [['created_at', 'DESC']],
     });
     return payments.map(toDto);
@@ -655,9 +626,8 @@ export class PaymentService {
         raw: true,
       }),
       Payment.count({ where: paidWhere }),
-      Customer.count(),
+      this.customerService.getCount(),
       Payment.findAll({
-        include: [{ model: Customer, required: false }],
         order: [['created_at', 'DESC']],
         limit: 10,
       }),

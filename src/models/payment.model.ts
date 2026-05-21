@@ -3,18 +3,16 @@ import {
   Column,
   DataType,
   Default,
-  ForeignKey,
-  BelongsTo,
 } from 'sequelize-typescript';
 import { Optional } from 'sequelize';
 import { BaseModel } from './base.model';
-import { Customer } from './customer.model';
 
 export type PaymentStatus = 'pending' | 'paid' | 'delivered' | 'failed' | 'refunded' | 'expired';
 
 interface PaymentAttributes {
   id: string;
-  customerId: string;
+  customerNickname: string;
+  customerEmail: string;
   productId: string;
   productName: string;
   productPrice: number;
@@ -60,12 +58,11 @@ type PaymentCreationAttributes = Optional<
 
 @Table({ tableName: 'payments' })
 export class Payment extends BaseModel<PaymentAttributes, PaymentCreationAttributes> {
-  @ForeignKey(() => Customer)
-  @Column(DataType.UUID)
-  declare customerId: string;
+  @Column(DataType.STRING(64))
+  declare customerNickname: string;
 
-  @BelongsTo(() => Customer)
-  declare customer: Customer;
+  @Column(DataType.STRING(256))
+  declare customerEmail: string;
 
   @Column(DataType.UUID)
   declare productId: string;

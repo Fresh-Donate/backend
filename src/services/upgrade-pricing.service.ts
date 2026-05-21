@@ -2,7 +2,6 @@ import { Op } from 'sequelize';
 import { Product } from '@/models/product.model';
 import { Group } from '@/models/group.model';
 import { Payment } from '@/models/payment.model';
-import { Customer } from '@/models/customer.model';
 import { Promotion } from '@/models/promotion.model';
 import { SettingsService } from './settings.service';
 import { activePromotionsAt, applyDiscount, totalDiscountPercent } from './promotion.service';
@@ -71,8 +70,8 @@ export class UpgradePricingService {
         where: {
           status: { [Op.in]: ['paid', 'delivered'] },
           productId: { [Op.in]: groupProductIds },
+          customerNickname: nickname,
         },
-        include: [{ model: Customer, where: { nickname }, required: true }],
         order: [['created_at', 'DESC']],
       });
       if (!lastPayment) continue;
