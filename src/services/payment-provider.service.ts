@@ -38,6 +38,15 @@ const DEFAULT_PROVIDERS: Array<{
     commissionPercent: 2.5,
     supportedCurrencies: ['RUB', 'USD', 'EUR'],
   },
+  {
+    providerId: 'tebex',
+    name: 'Tebex',
+    description: 'Платежи через Tebex Checkout API. Валюта определяется аккаунтом Tebex. Требует одобрения от Tebex (account manager).',
+    icon: 'i-lucide-gamepad-2',
+    credentials: { projectId: '', privateKey: '', webhookSecret: '' },
+    commissionPercent: 5,
+    supportedCurrencies: ['USD', 'EUR', 'GBP'],
+  },
 ];
 
 function toDto(p: PaymentProvider): PaymentProviderDto {
