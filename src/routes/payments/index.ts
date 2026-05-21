@@ -41,9 +41,6 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return reply.code(201).send(payment);
   });
 
-  // Returns the unit price the buyer will actually be charged after promo +
-  // upgrade discounts, so the modal can show the real number before
-  // committing instead of the buyer discovering it on the YooKassa page.
   fastify.post<{
     Body: { productId: string; nickname?: string };
   }>('/preview', {

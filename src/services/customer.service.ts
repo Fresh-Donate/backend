@@ -1,4 +1,3 @@
-import { Customer } from '@/models/customer.model';
 import { Payment } from '@/models/payment.model';
 import { Op, fn, col, literal } from 'sequelize';
 import { SettingsService } from './settings.service';
@@ -7,72 +6,71 @@ import type { CustomerDto, CustomerCurrencyStats } from '@/types';
 
 const COUNTED_STATUSES = ['paid', 'delivered'];
 
-function toDto(c: Customer, stats: CustomerCurrencyStats[]): CustomerDto {
-  return {
-    id: c.id,
-    nickname: c.nickname,
-    email: c.email,
-    stats,
-    createdAt: c.createdAt.toISOString(),
-    updatedAt: c.updatedAt.toISOString(),
-  };
-}
-
-async function aggregateStatsForCustomers(customerIds: string[]): Promise<Map<string, CustomerCurrencyStats[]>> {
+async function statsByNickname(nicknames: string[]): Promise<Map<string, CustomerCurrencyStats[]>> {
   const map = new Map<string, CustomerCurrencyStats[]>();
-  if (customerIds.length === 0) return map;
+  if (nicknames.length === 0) return map;
 
   const rows = await Payment.findAll({
     attributes: [
-      'customerId',
+      'customerNickname',
       'currency',
       [fn('SUM', col('total_amount')), 'totalSpent'],
       [fn('COUNT', literal('*')), 'purchaseCount'],
     ],
     where: {
-      customerId: { [Op.in]: customerIds },
+      customerNickname: { [Op.in]: nicknames },
       status: { [Op.in]: COUNTED_STATUSES },
     },
-    group: ['customerId', 'currency'],
+    group: ['customer_nickname', 'currency'],
     raw: true,
   }) as unknown as Array<{
-    customerId: string;
+    customerNickname: string;
     currency: string;
     totalSpent: string | number;
     purchaseCount: string | number;
   }>;
 
   for (const row of rows) {
-    const list = map.get(row.customerId) ?? [];
+    const list = map.get(row.customerNickname) ?? [];
     list.push({
       currency: row.currency,
       totalSpent: Number(row.totalSpent),
       purchaseCount: Number(row.purchaseCount),
     });
-    map.set(row.customerId, list);
+    map.set(row.customerNickname, list);
   }
   return map;
 }
 
+async function emailByNickname(nicknames: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (nicknames.length === 0) return map;
+
+  const rows = await Payment.findAll({
+    where: {
+      customerNickname: { [Op.in]: nicknames },
+      status: { [Op.in]: COUNTED_STATUSES },
+    },
+    attributes: ['customerNickname', 'customerEmail'],
+    order: [['created_at', 'DESC']],
+  });
+
+  for (const r of rows) {
+    if (!map.has(r.customerNickname)) {
+      map.set(r.customerNickname, r.customerEmail);
+    }
+  }
+  return map;
+}
+
+interface AggregateRow {
+  nickname: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export class CustomerService {
   private settingsService = new SettingsService();
-
-  async findOrCreate(nickname: string, email: string): Promise<CustomerDto> {
-    let customer = await Customer.findOne({
-      where: { [Op.or]: [{ nickname }, { email }] },
-    });
-
-    if (customer) {
-      if (customer.nickname !== nickname || customer.email !== email) {
-        await customer.update({ nickname, email });
-      }
-    } else {
-      customer = await Customer.create({ nickname, email });
-    }
-
-    const statsMap = await aggregateStatsForCustomers([customer.id]);
-    return toDto(customer, statsMap.get(customer.id) ?? []);
-  }
 
   async findAll(options?: {
     search?: string;
@@ -81,76 +79,119 @@ export class CustomerService {
     sortBy?: 'nickname' | 'email' | 'createdAt' | 'purchaseCount' | 'totalSpent';
     sortOrder?: 'asc' | 'desc';
   }): Promise<{ items: CustomerDto[]; total: number }> {
-    const where: any = {};
+    const limit = options?.limit || 50;
+    const offset = options?.offset || 0;
+    const sortBy = options?.sortBy ?? 'createdAt';
+    const direction = options?.sortOrder === 'asc' ? 'ASC' : 'DESC';
+
+    const where: any = { status: { [Op.in]: COUNTED_STATUSES } };
     if (options?.search) {
       where[Op.or] = [
-        { nickname: { [Op.iLike]: `%${options.search}%` } },
-        { email: { [Op.iLike]: `%${options.search}%` } },
+        { customerNickname: { [Op.iLike]: `%${options.search}%` } },
+        { customerEmail: { [Op.iLike]: `%${options.search}%` } },
       ];
     }
 
-    const sortBy = options?.sortBy ?? 'createdAt';
-    const sortDirection = options?.sortOrder === 'asc' ? 'ASC' : 'DESC';
-
-    // Aggregate sort columns (purchaseCount/totalSpent) are computed via
-    // correlated subqueries on the fly. totalSpent normalises into the
-    // admin's base currency so cross-currency sums are comparable.
     let order: any[];
-    if (sortBy === 'purchaseCount') {
-      order = [
-        [
-          literal(
-            `(SELECT COUNT(*) FROM payments WHERE payments.customer_id = "Customer"."id" AND payments.status IN ('paid', 'delivered'))`,
-          ),
-          sortDirection,
-        ],
-        ['created_at', 'DESC'],
-      ];
+    if (sortBy === 'nickname') {
+      order = [[col('customer_nickname'), direction]];
+    } else if (sortBy === 'email') {
+      order = [[fn('MAX', col('customer_email')), direction]];
+    } else if (sortBy === 'purchaseCount') {
+      order = [[fn('COUNT', literal('*')), direction]];
     } else if (sortBy === 'totalSpent') {
       const settings = await this.settingsService.get();
       const amountInBase = buildAmountInBaseSql(
         settings.currency_rates,
         settings.base_currency,
-        'payments.total_amount',
-        'payments.currency',
+        'total_amount',
+        'currency',
       );
-      order = [
-        [
-          literal(
-            `(SELECT COALESCE(SUM(${amountInBase}), 0) FROM payments WHERE payments.customer_id = "Customer"."id" AND payments.status IN ('paid', 'delivered'))`,
-          ),
-          sortDirection,
-        ],
-        ['created_at', 'DESC'],
-      ];
-    } else if (sortBy === 'createdAt') {
-      order = [['created_at', sortDirection]];
+      order = [[fn('SUM', literal(amountInBase)), direction]];
     } else {
-      order = [[sortBy, sortDirection], ['created_at', 'DESC']];
+      order = [[fn('MIN', col('created_at')), direction]];
     }
 
-    const { rows, count } = await Customer.findAndCountAll({
-      where,
-      order,
-      limit: options?.limit || 50,
-      offset: options?.offset || 0,
-    });
+    const [rows, totalRows] = await Promise.all([
+      Payment.findAll({
+        where,
+        attributes: [
+          [col('customer_nickname'), 'nickname'],
+          [fn('MIN', col('created_at')), 'createdAt'],
+          [fn('MAX', fn('COALESCE', col('paid_at'), col('created_at'))), 'updatedAt'],
+        ],
+        group: ['customer_nickname'],
+        order,
+        limit,
+        offset,
+        raw: true,
+      }) as unknown as Promise<AggregateRow[]>,
+      Payment.findAll({
+        where,
+        attributes: [[fn('COUNT', fn('DISTINCT', col('customer_nickname'))), 'count']],
+        raw: true,
+      }) as unknown as Promise<Array<{ count: string }>>,
+    ]);
 
-    const statsMap = await aggregateStatsForCustomers(rows.map((r) => r.id));
+    const total = Number(totalRows[0]?.count ?? 0);
+    const nicknames = rows.map((r) => r.nickname);
+    const [statsMap, emailMap] = await Promise.all([
+      statsByNickname(nicknames),
+      emailByNickname(nicknames),
+    ]);
+
     return {
-      items: rows.map((r) => toDto(r, statsMap.get(r.id) ?? [])),
-      total: count,
+      items: rows.map((r) => ({
+        id: r.nickname,
+        nickname: r.nickname,
+        email: emailMap.get(r.nickname) ?? '',
+        stats: statsMap.get(r.nickname) ?? [],
+        createdAt: new Date(r.createdAt).toISOString(),
+        updatedAt: new Date(r.updatedAt).toISOString(),
+      })),
+      total,
     };
   }
 
-  async findById(id: string): Promise<CustomerDto | null> {
-    const customer = await Customer.findByPk(id);
-    if (!customer) return null;
-    const statsMap = await aggregateStatsForCustomers([id]);
-    return toDto(customer, statsMap.get(id) ?? []);
+  async findById(nickname: string): Promise<CustomerDto | null> {
+    const rows = await Payment.findAll({
+      where: {
+        customerNickname: nickname,
+        status: { [Op.in]: COUNTED_STATUSES },
+      },
+      attributes: [
+        [col('customer_nickname'), 'nickname'],
+        [fn('MIN', col('created_at')), 'createdAt'],
+        [fn('MAX', fn('COALESCE', col('paid_at'), col('created_at'))), 'updatedAt'],
+      ],
+      group: ['customer_nickname'],
+      raw: true,
+    }) as unknown as AggregateRow[];
+
+    const row = rows[0];
+    if (!row) return null;
+
+    const [statsMap, emailMap] = await Promise.all([
+      statsByNickname([nickname]),
+      emailByNickname([nickname]),
+    ]);
+
+    return {
+      id: row.nickname,
+      nickname: row.nickname,
+      email: emailMap.get(nickname) ?? '',
+      stats: statsMap.get(nickname) ?? [],
+      createdAt: new Date(row.createdAt).toISOString(),
+      updatedAt: new Date(row.updatedAt).toISOString(),
+    };
   }
 
   async getCount(): Promise<number> {
-    return Customer.count();
+    const rows = await Payment.findAll({
+      where: { status: { [Op.in]: COUNTED_STATUSES } },
+      attributes: [[fn('COUNT', fn('DISTINCT', col('customer_nickname'))), 'count']],
+      raw: true,
+    }) as unknown as Array<{ count: string }>;
+    return Number(rows[0]?.count ?? 0);
   }
 }

@@ -5,7 +5,7 @@ export type CommandVariables = Record<string, string>;
 
 export function buildCommandVariables(payment: Payment, product: Product): CommandVariables {
   return {
-    player: payment.customer?.nickname || '',
+    player: payment.customerNickname || '',
     amount: String(product.quantity * payment.userSelectedCount),
     product: product.name,
   };

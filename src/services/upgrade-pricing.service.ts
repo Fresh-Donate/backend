@@ -2,7 +2,6 @@ import { Op } from 'sequelize';
 import { Product } from '@/models/product.model';
 import { Group } from '@/models/group.model';
 import { Payment } from '@/models/payment.model';
-import { Customer } from '@/models/customer.model';
 import { Promotion } from '@/models/promotion.model';
 import { SettingsService } from './settings.service';
 import { activePromotionsAt, applyDiscount, totalDiscountPercent } from './promotion.service';
@@ -64,20 +63,16 @@ export class UpgradePricingService {
       const groupProductIds = await this.productIdsInGroup(group.id);
       if (groupProductIds.length === 0) continue;
 
-      // Don't exclude the target product itself — the "<=" branch below
-      // catches "buying the same rank again" and blocks it cleanly, which
-      // is preferable to letting it through with discount = full price.
       const lastPayment = await Payment.findOne({
         where: {
           status: { [Op.in]: ['paid', 'delivered'] },
           productId: { [Op.in]: groupProductIds },
+          customerNickname: nickname,
         },
-        include: [{ model: Customer, where: { nickname }, required: true }],
         order: [['created_at', 'DESC']],
       });
       if (!lastPayment) continue;
 
-      // Prior product may have been deleted between purchase and now.
       const prior = await Product.findByPk(lastPayment.productId, {
         include: [{ model: Promotion, through: { attributes: [] as string[] }, required: false }],
       });
@@ -101,8 +96,6 @@ export class UpgradePricingService {
         if (!reference || refRounded > reference.referencePrice) {
           reference = { productId: prior.id, productName: prior.name, referencePrice: refRounded };
         }
-        // Keep scanning so `reference` ends up pointing at the most expensive
-        // blocking rank when several groups would all block.
         continue;
       }
 

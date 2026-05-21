@@ -2,9 +2,8 @@ import type { PaymentStatus } from '@/models/payment.model';
 
 export interface PaymentDto {
   id: string;
-  customerId: string;
-  customerNickname?: string;
-  customerEmail?: string;
+  customerNickname: string;
+  customerEmail: string;
   productId: string;
   productName: string;
   productPrice: number;

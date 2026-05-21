@@ -1,7 +1,6 @@
 import { type FastifyPluginAsync } from 'fastify';
 import { Payment } from '@/models/payment.model';
 import { Product } from '@/models/product.model';
-import { Customer } from '@/models/customer.model';
 import { SettingsService } from '@/services/settings.service';
 import { buildCommandVariables, resolveCommandVariables } from '@/utils/command-variables';
 
@@ -34,15 +33,11 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       where: {
         status: 'paid',
       },
-      include: [
-        { model: Customer, required: false },
-      ],
       order: [['created_at', 'ASC']],
       limit: 50,
     });
 
-    // Only payments whose product still has commands need plugin delivery —
-    // command-less ones are auto-marked delivered by DeliveryService.
+
     const result = [];
 
     for (const payment of payments) {
@@ -99,9 +94,7 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     const { paymentId } = request.params;
     const { success, logs } = request.body;
 
-    const payment = await Payment.findByPk(paymentId, {
-      include: [{ model: Customer, required: false }],
-    });
+    const payment = await Payment.findByPk(paymentId);
 
     if (!payment) {
       return reply.code(404).send({ error: 'Payment not found' });

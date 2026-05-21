@@ -38,18 +38,20 @@ const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     });
   });
 
-  fastify.get<{ Params: { id: string } }>('/:id', {
+  // Customer key is the Minecraft nickname — there's no stored UUID anymore,
+  // customer data is aggregated from `payments` on the fly.
+  fastify.get<{ Params: { nickname: string } }>('/:nickname', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
-    const customer = await customerService.findById(request.params.id);
+    const customer = await customerService.findById(request.params.nickname);
     if (!customer) return reply.code(404).send({ error: 'Customer not found' });
     return customer;
   });
 
-  fastify.get<{ Params: { id: string } }>('/:id/payments', {
+  fastify.get<{ Params: { nickname: string } }>('/:nickname/payments', {
     onRequest: [fastify.authenticate],
   }, async (request) => {
-    return paymentService.findByCustomerId(request.params.id);
+    return paymentService.findByNickname(request.params.nickname);
   });
 };
 

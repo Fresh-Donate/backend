@@ -1,6 +1,5 @@
 import { Payment } from '@/models/payment.model';
 import { Product } from '@/models/product.model';
-import { Customer } from '@/models/customer.model';
 import { RconService } from './rcon.service';
 import { SettingsService } from './settings.service';
 import { buildCommandVariables } from '@/utils/command-variables';
@@ -29,9 +28,7 @@ export class DeliveryService {
       return;
     }
 
-    const payment = await Payment.findByPk(paymentId, {
-      include: [{ model: Customer, required: false }],
-    });
+    const payment = await Payment.findByPk(paymentId);
     if (!payment) return;
     if (payment.status !== 'paid') return;
 
