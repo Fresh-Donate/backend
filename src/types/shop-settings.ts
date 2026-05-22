@@ -1,4 +1,5 @@
 import type { OwnerType } from '@/models/shop-settings.model';
+import type { CurrencyRates, SupportedCurrency } from '@/utils/currency';
 
 export interface ShopSettingsDto {
   name: string;
@@ -10,4 +11,6 @@ export interface ShopSettingsDto {
   ownerType: OwnerType;
   ownerInn: string;
   contactEmail: string;
+  baseCurrency: SupportedCurrency;
+  currencyRates: CurrencyRates;
 }
