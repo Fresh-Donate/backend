@@ -1,29 +1,45 @@
-// Tebex Checkout API — https://docs.tebex.io/developers/checkout-api/overview
-// One-shot endpoint that creates a basket + items + sale in a single call.
-// Returns a checkout URL the buyer is redirected to.
+// Tebex Headless API — https://docs.tebex.io/developers/headless-api/overview
+// We can't pass arbitrary prices: every line item must reference a Package
+// already created in the Tebex Dashboard. To handle dynamic totals we keep a
+// set of "coin" packages (0.01 / 0.1 / 1 / 10 / 100 / 1000 in the account
+// currency) and decompose the amount across them greedily.
 
-export interface TebexCheckoutResponse {
-  ident: string;
-  returnUrl: string;
+export interface TebexBasketResponse {
+  data: {
+    id?: string;
+    ident: string;
+    complete?: boolean;
+    email?: string | null;
+    username?: string | null;
+    base_price?: number;
+    sales_tax?: number;
+    total_price?: number;
+    currency?: string;
+    packages?: Array<{ qty: number; type: string }>;
+    custom?: Record<string, unknown> | null;
+    links: {
+      checkout: string;
+      [key: string]: string;
+    };
+  };
 }
 
-export interface CreateTebexCheckoutParams {
-  // Our payment.id — round-trips back via webhook in basket.custom.payment_id.
-  orderId: string;
-  amount: number;
-  // Tebex uses the account's configured currency — passing this for parity
-  // with other gateways, but Tebex will silently use its own.
-  currency: string;
-  productName: string;
-  nickname: string;
-  email: string;
-  returnUrl: string;
+export interface CreateTebexBasketParams {
+  paymentId: string;
   completeUrl: string;
+  cancelUrl: string;
 }
 
-// Webhook envelope. Tebex wraps all events as { id, type, date, subject }.
-// `subject` shape depends on `type` — for payment.* it's a transaction object,
-// for validation.webhook it's empty.
+export interface TebexCoinPlan {
+  packageId: string;
+  quantity: number;
+  denomination: number;
+}
+
+// Webhook envelope. Tebex wraps every event as { id, type, date, subject }.
+// `subject` for payment.* events is a transaction object; for the one-shot
+// `validation.webhook` (sent when the endpoint is first configured in their
+// panel) the subject is absent.
 export interface TebexWebhookEnvelope {
   id: string;
   type: string;
@@ -74,8 +90,8 @@ export interface TebexTransactionSubject {
     paid_price?: { amount: number; currency: string };
     custom?: Record<string, unknown> | null;
   }>;
-  // basket.custom is echoed here on most payloads — that's where we put our
-  // payment.id at checkout creation, used to look up the right Payment.
+  // basket.custom is echoed here — we stash our payment.id there at basket
+  // creation, then look it up here to find the right Payment row.
   custom?: Record<string, unknown> | null;
   decline_reason?: {
     code?: string;

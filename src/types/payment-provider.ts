@@ -9,6 +9,7 @@ export interface PaymentProviderDto {
   enabled: boolean;
   testMode: boolean;
   credentials: Record<string, string>;
+  providerConfig: Record<string, any>;
   commissionPercent: number;
   commissionRule: CommissionRuleData;
   supportedCurrencies: string[];
@@ -18,6 +19,8 @@ export interface UpdatePaymentProviderDto {
   enabled?: boolean;
   testMode?: boolean;
   credentials?: Record<string, string>;
+  providerConfig?: Record<string, any>;
   commissionPercent?: number;
   commissionRule?: CommissionRuleData;
+  supportedCurrencies?: string[];
 }

@@ -21,7 +21,7 @@ import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
 import { TebexGateway } from '@/gateways/tebex.gateway';
 import { config } from '@/config';
-import { buildAmountInTargetSql, isSupportedCurrency } from '@/utils/currency';
+import { buildAmountInTargetSql, convert, isSupportedCurrency } from '@/utils/currency';
 import type {
   PaymentDto,
   CreatePaymentDto,
@@ -153,6 +153,7 @@ export class PaymentService {
     const productPrice = Math.round(finalUnit * count * 100) / 100;
     const productCurrency = product.currency;
     let paymentCurrency = productCurrency;
+    let chargedPrice = productPrice;
     let commissionPercent = 0;
     let commissionAmount = 0;
     let totalAmount = productPrice;
@@ -165,20 +166,26 @@ export class PaymentService {
           : provider.supportedCurrencies[0];
       }
 
+      chargedPrice = paymentCurrency === productCurrency
+        ? productPrice
+        : Math.round(
+          convert(productPrice, productCurrency, paymentCurrency, settings.currency_rates, settings.base_currency) * 100,
+        ) / 100;
+
       commissionPercent = Number(provider.commissionPercent) || 0;
-      commissionAmount = Math.round(productPrice * commissionPercent) / 100;
+      commissionAmount = Math.round(chargedPrice * commissionPercent) / 100;
 
       const rule = provider.commissionRule;
       if (rule.mode === 'buyer') {
-        totalAmount = productPrice + commissionAmount;
-        providerAmount = productPrice;
+        totalAmount = chargedPrice + commissionAmount;
+        providerAmount = chargedPrice;
       } else if (rule.mode === 'split') {
         const buyerShare = Math.round(commissionAmount * 50) / 100;
-        totalAmount = productPrice + buyerShare;
-        providerAmount = productPrice - (commissionAmount - buyerShare);
+        totalAmount = chargedPrice + buyerShare;
+        providerAmount = chargedPrice - (commissionAmount - buyerShare);
       } else {
-        totalAmount = productPrice;
-        providerAmount = productPrice - commissionAmount;
+        totalAmount = chargedPrice;
+        providerAmount = chargedPrice - commissionAmount;
       }
     }
 
@@ -321,32 +328,31 @@ export class PaymentService {
         },
       });
     } else if (provider.providerId === 'tebex') {
-      const { projectId, privateKey } = provider.credentials;
-      if (!projectId || !privateKey) {
+      const { webstoreToken, privateKey } = provider.credentials;
+      if (!webstoreToken || !privateKey) {
         throw new PaymentError(
-          'Tebex credentials not configured. Set projectId and privateKey in payment provider settings.',
+          'Tebex credentials not configured. Set webstoreToken and privateKey in payment provider settings.',
           'TEBEX_NOT_CONFIGURED',
         );
       }
 
-      const gateway = new TebexGateway(projectId, privateKey);
+      const coinPackages = (provider.providerConfig?.coinPackages || {}) as Record<string, string>;
+
+      const gateway = new TebexGateway(webstoreToken, privateKey);
       const returnUrl = config.payment.returnUrl;
 
       const checkout = await gateway.createCheckout({
-        orderId: payment.id,
         amount: Number(payment.totalAmount),
-        currency: payment.currency,
-        productName,
-        nickname: payment.customerNickname,
-        email: payment.customerEmail,
-        returnUrl: `${returnUrl}?paymentId=${payment.id}`,
+        paymentId: payment.id,
         completeUrl: `${returnUrl}?paymentId=${payment.id}`,
+        cancelUrl: `${returnUrl}?paymentId=${payment.id}&cancelled=1`,
+        coinPackages: coinPackages as any,
       });
 
       await payment.update({
         providerId: provider.providerId,
         externalPaymentId: checkout.ident,
-        externalPaymentUrl: checkout.returnUrl,
+        externalPaymentUrl: checkout.checkoutUrl,
       });
     }
   }

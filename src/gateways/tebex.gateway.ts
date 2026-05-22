@@ -1,77 +1,132 @@
 import axios, { type AxiosInstance } from 'axios';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { PaymentError } from '@/core/errors';
+import {
+  decomposeAmount,
+  missingCoinDenominations,
+  type CoinPackagesMap,
+} from '@/utils/coin-decomposition';
 import type {
-  TebexCheckoutResponse,
-  CreateTebexCheckoutParams,
+  TebexBasketResponse,
+  CreateTebexBasketParams,
 } from '@/types';
 
-const TEBEX_CHECKOUT_API_URL = 'https://checkout.tebex.io/api';
+const TEBEX_HEADLESS_API_URL = 'https://headless.tebex.io/api';
 
-// Tebex Checkout API. Project ID + Private Key are pasted from
-// developer settings in tebex.io. The `/checkout` endpoint requires Tebex
-// to whitelist your project — request approval via your account manager
-// before going live.
+// Tebex Headless API: low-level endpoints to build a basket from existing
+// catalogue packages, returning a checkout URL. Auth = HTTP Basic over the
+// webstore's public token (username) and the project's private key
+// (password) from developer settings in tebex.io.
+//
+// We can't pass arbitrary prices, so the admin pre-creates a small set of
+// "coin" packages (see utils/coin-decomposition) and we assemble the target
+// amount from them greedily.
 export class TebexGateway {
   private client: AxiosInstance;
+  private webstoreToken: string;
 
-  constructor(projectId: string, privateKey: string) {
+  constructor(webstoreToken: string, privateKey: string) {
+    this.webstoreToken = webstoreToken;
     this.client = axios.create({
-      baseURL: TEBEX_CHECKOUT_API_URL,
-      auth: { username: projectId, password: privateKey },
+      baseURL: TEBEX_HEADLESS_API_URL,
+      auth: { username: webstoreToken, password: privateKey },
       headers: { 'Content-Type': 'application/json' },
       timeout: 15000,
     });
   }
 
-  async createCheckout(params: CreateTebexCheckoutParams): Promise<TebexCheckoutResponse> {
-    // Tebex prices are in the project's account currency — we still send the
-    // amount we computed; if the admin set up the Tebex account in USD but
-    // the product is priced in RUB, this will be wrong. The Payment row
-    // captures whatever Tebex actually charged from the webhook later.
+  async createBasket(params: CreateTebexBasketParams): Promise<TebexBasketResponse['data']> {
     const body = {
-      basket: {
-        // Tebex requires first/last name fields; we only have a Minecraft
-        // nickname, so duplicate it into first_name and leave last_name blank.
-        first_name: params.nickname,
-        last_name: '',
-        email: params.email,
-        return_url: params.returnUrl,
-        complete_url: params.completeUrl,
-        custom: {
-          payment_id: params.orderId,
-          nickname: params.nickname,
-        },
-      },
-      items: [
-        {
-          package: {
-            name: params.productName,
-            price: Number(params.amount.toFixed(2)),
-            type: 'single',
-            qty: 1,
-            custom: { payment_id: params.orderId },
-          },
-        },
-      ],
+      complete_url: params.completeUrl,
+      cancel_url: params.cancelUrl,
+      complete_auto_redirect: true,
+      // basket.custom is echoed back in webhook subjects — that's how we
+      // resolve a webhook back to a Payment without relying on shaky
+      // transaction-id matching.
+      custom: { payment_id: params.paymentId },
     };
 
     try {
-      const { data } = await this.client.post<TebexCheckoutResponse>('/checkout', body);
-      return data;
+      const { data } = await this.client.post<TebexBasketResponse>(
+        `/accounts/${this.webstoreToken}/baskets`,
+        body,
+      );
+      return data.data;
     } catch (error: any) {
-      const detail =
-        error.response?.data?.message
-        || error.response?.data?.error
-        || error.response?.data?.errors?.[0]?.message
-        || error.message;
-      throw new PaymentError(`Tebex createCheckout failed: ${detail}`, 'TEBEX_CREATE_ERROR');
+      const detail = this.extractErrorMessage(error);
+      throw new PaymentError(`Tebex createBasket failed: ${detail}`, 'TEBEX_CREATE_BASKET_ERROR');
     }
   }
 
+  async addPackage(basketIdent: string, packageId: string, quantity: number): Promise<void> {
+    try {
+      await this.client.post(`/baskets/${basketIdent}/packages`, {
+        package_id: packageId,
+        quantity,
+      });
+    } catch (error: any) {
+      const detail = this.extractErrorMessage(error);
+      throw new PaymentError(
+        `Tebex addPackage failed (basket=${basketIdent} pkg=${packageId} qty=${quantity}): ${detail}`,
+        'TEBEX_ADD_PACKAGE_ERROR',
+      );
+    }
+  }
+
+  /**
+   * High-level helper: create a basket, decompose `amount` across the
+   * coin-packages map, push each line to the basket, return checkout URL +
+   * the basket ident (used as `externalPaymentId`).
+   *
+   * Throws `TEBEX_COINS_NOT_CONFIGURED` if any of the six denominations is
+   * missing from the map — better to fail loudly at checkout creation than
+   * to charge a partial amount.
+   */
+  async createCheckout(params: {
+    amount: number;
+    paymentId: string;
+    completeUrl: string;
+    cancelUrl: string;
+    coinPackages: CoinPackagesMap;
+  }): Promise<{ ident: string; checkoutUrl: string }> {
+    const missing = missingCoinDenominations(params.coinPackages);
+    if (missing.length > 0) {
+      throw new PaymentError(
+        `Tebex coin packages not configured for denominations: ${missing.join(', ')}. Create them in the Tebex Dashboard and paste their package IDs in the provider settings.`,
+        'TEBEX_COINS_NOT_CONFIGURED',
+      );
+    }
+
+    const plan = decomposeAmount(params.amount, params.coinPackages);
+    if (plan.length === 0) {
+      throw new PaymentError(
+        `Tebex decomposition produced no items for amount ${params.amount}. Amount is too small for the configured denominations.`,
+        'TEBEX_DECOMPOSITION_EMPTY',
+      );
+    }
+
+    const basket = await this.createBasket({
+      paymentId: params.paymentId,
+      completeUrl: params.completeUrl,
+      cancelUrl: params.cancelUrl,
+    });
+
+    // Sequential — Tebex doesn't document a bulk-add endpoint and parallel
+    // POSTs to the same basket would race the server-side total.
+    for (const line of plan) {
+      await this.addPackage(basket.ident, line.packageId, line.quantity);
+    }
+
+    if (!basket.links?.checkout) {
+      throw new PaymentError('Tebex basket returned without a checkout URL', 'TEBEX_NO_CHECKOUT_URL');
+    }
+
+    return { ident: basket.ident, checkoutUrl: basket.links.checkout };
+  }
+
   // Tebex signs webhooks with HMAC-SHA256 over the *hex SHA256 of the raw
-  // body*, using the webhook secret as the HMAC key. The result is compared
-  // to the `X-Signature` header. We use the exact bytes Fastify received —
+  // body*, using the webhook secret as the HMAC key. Compared to the
+  // `X-Signature` header. We use the exact bytes Fastify received —
   // re-serialising JSON would change the hash.
   static verifyWebhookSignature(
     rawBody: Buffer | string,
@@ -84,7 +139,6 @@ export class TebexGateway {
     const bodyHashHex = createHash('sha256').update(bodyBuffer).digest('hex');
     const expectedHex = createHmac('sha256', secret).update(bodyHashHex).digest('hex');
 
-    // Constant-time compare to avoid signature-timing leaks.
     try {
       const expected = Buffer.from(expectedHex, 'hex');
       const provided = Buffer.from(signatureHex, 'hex');
@@ -93,5 +147,16 @@ export class TebexGateway {
     } catch {
       return false;
     }
+  }
+
+  private extractErrorMessage(error: any): string {
+    return (
+      error.response?.data?.detail
+      || error.response?.data?.message
+      || error.response?.data?.error
+      || error.response?.data?.errors?.[0]?.detail
+      || error.response?.data?.errors?.[0]?.message
+      || error.message
+    );
   }
 }
