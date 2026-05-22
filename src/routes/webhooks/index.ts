@@ -175,8 +175,11 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   });
 
   // Tebex: HMAC-SHA256 over hex(SHA256(rawBody)) keyed by webhookSecret,
-  // delivered in X-Signature. Tebex pings `validation.webhook` once when
-  // the endpoint is added in their panel — we just need to return 200.
+  // delivered in X-Signature. When admin first registers the endpoint in
+  // the Tebex panel, Tebex sends a `validation.webhook` event and expects
+  // us to echo back its `id` in the JSON response body — otherwise the
+  // endpoint stays in "Cannot be validated" state. Real payment events
+  // accept any 2xx ack.
   fastify.post<{ Body: Record<string, any> }>('/tebex', {
     config: { rateLimit: { max: 200, timeWindow: 60000 } },
   }, async (request, reply) => {
@@ -214,13 +217,18 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       `Tebex webhook: type=${payload.type} id=${payload.id} tx=${payload.subject?.transaction_id}`,
     );
 
+    // Validation handshake — must echo back the envelope id, nothing else.
+    if (payload.type === 'validation.webhook') {
+      return reply.code(200).send({ id: payload.id });
+    }
+
     try {
       await paymentService.handleTebexWebhook(payload);
     } catch (error: any) {
       request.log.error(`Tebex webhook processing error: ${error.message}`);
     }
 
-    return reply.code(200).send({ status: 'ok' });
+    return reply.code(200).send({ id: payload.id });
   });
 };
 
