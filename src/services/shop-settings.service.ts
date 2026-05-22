@@ -1,4 +1,5 @@
 import { ShopSettings, type OwnerType } from '@/models/shop-settings.model';
+import { SettingsService } from '@/services/settings.service';
 import type { ShopSettingsDto } from '@/types';
 
 const OWNER_TYPES: readonly OwnerType[] = ['', 'individual', 'self_employed', 'sole_proprietor', 'legal_entity'] as const;
@@ -32,7 +33,10 @@ function normalizeInn(value: string | undefined): string | undefined {
   return value.replace(/\D/g, '').slice(0, 12);
 }
 
-function toDto(s: ShopSettings): ShopSettingsDto {
+function toDto(
+  s: ShopSettings,
+  currency: Pick<Awaited<ReturnType<SettingsService['get']>>, 'base_currency' | 'currency_rates'>,
+): ShopSettingsDto {
   return {
     name: s.name,
     description: s.description,
@@ -43,17 +47,22 @@ function toDto(s: ShopSettings): ShopSettingsDto {
     ownerType: ((OWNER_TYPES as readonly string[]).includes(s.ownerType) ? s.ownerType : '') as OwnerType,
     ownerInn: s.ownerInn ?? '',
     contactEmail: s.contactEmail ?? '',
+    baseCurrency: currency.base_currency,
+    currencyRates: currency.currency_rates,
   };
 }
 
 export class ShopSettingsService {
+  private settingsService = new SettingsService();
+
   async get(): Promise<ShopSettingsDto> {
     const [settings] = await ShopSettings.findOrCreate({
       where: {},
       defaults: DEFAULTS,
     });
 
-    return toDto(settings);
+    const currency = await this.settingsService.get();
+    return toDto(settings, currency);
   }
 
   async update(data: Partial<ShopSettingsDto>): Promise<ShopSettingsDto> {
@@ -71,6 +80,7 @@ export class ShopSettingsService {
 
     await settings.update(patch);
 
-    return toDto(settings);
+    const currency = await this.settingsService.get();
+    return toDto(settings, currency);
   }
 }
