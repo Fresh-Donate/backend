@@ -28,6 +28,8 @@ export interface CreateTebexBasketParams {
   paymentId: string;
   completeUrl: string;
   cancelUrl: string;
+  username: string;
+  ipAddress: string;
 }
 
 export interface TebexCoinPlan {
@@ -36,10 +38,6 @@ export interface TebexCoinPlan {
   denomination: number;
 }
 
-// Webhook envelope. Tebex wraps every event as { id, type, date, subject }.
-// `subject` for payment.* events is a transaction object; for the one-shot
-// `validation.webhook` (sent when the endpoint is first configured in their
-// panel) the subject is absent.
 export interface TebexWebhookEnvelope {
   id: string;
   type: string;
@@ -90,8 +88,6 @@ export interface TebexTransactionSubject {
     paid_price?: { amount: number; currency: string };
     custom?: Record<string, unknown> | null;
   }>;
-  // basket.custom is echoed here — we stash our payment.id there at basket
-  // creation, then look it up here to find the right Payment row.
   custom?: Record<string, unknown> | null;
   decline_reason?: {
     code?: string;

@@ -33,4 +33,5 @@ export interface CreatePaymentDto {
   email: string;
   count?: number;
   paymentOptionId: string;
+  customerIp?: string; // Required for tebex
 }

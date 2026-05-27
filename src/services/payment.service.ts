@@ -227,7 +227,7 @@ export class PaymentService {
     });
 
     if (provider && provider.enabled) {
-      await this.createExternalPayment(payment, provider, product.name);
+      await this.createExternalPayment(payment, provider, product.name, data.customerIp);
     }
 
     const result = await Payment.findByPk(payment.id);
@@ -239,6 +239,7 @@ export class PaymentService {
     payment: Payment,
     provider: InstanceType<typeof PaymentProvider>,
     productName: string,
+    customerIp: string | undefined,
   ): Promise<void> {
     if (provider.providerId === 'yookassa') {
       const { shopId, secretKey } = provider.credentials;
@@ -347,6 +348,8 @@ export class PaymentService {
         completeUrl: `${returnUrl}?paymentId=${payment.id}`,
         cancelUrl: `${returnUrl}?paymentId=${payment.id}&cancelled=1`,
         coinPackages: coinPackages as any,
+        username: payment.customerNickname,
+        ipAddress: customerIp || '',
       });
 
       await payment.update({

@@ -36,14 +36,14 @@ export class TebexGateway {
   }
 
   async createBasket(params: CreateTebexBasketParams): Promise<TebexBasketResponse['data']> {
-    const body = {
+    const body: Record<string, unknown> = {
       complete_url: params.completeUrl,
       cancel_url: params.cancelUrl,
       complete_auto_redirect: true,
-      // basket.custom is echoed back in webhook subjects — that's how we
-      // resolve a webhook back to a Payment without relying on shaky
-      // transaction-id matching.
       custom: { payment_id: params.paymentId },
+      // Required for Tebex
+      username: params.username,
+      ip_address: extractIPv4(params.ipAddress),
     };
 
     try {
@@ -88,6 +88,8 @@ export class TebexGateway {
     completeUrl: string;
     cancelUrl: string;
     coinPackages: CoinPackagesMap;
+    username: string;
+    ipAddress: string;
   }): Promise<{ ident: string; checkoutUrl: string }> {
     const missing = missingCoinDenominations(params.coinPackages);
     if (missing.length > 0) {
@@ -109,6 +111,8 @@ export class TebexGateway {
       paymentId: params.paymentId,
       completeUrl: params.completeUrl,
       cancelUrl: params.cancelUrl,
+      username: params.username,
+      ipAddress: params.ipAddress,
     });
 
     // Sequential — Tebex doesn't document a bulk-add endpoint and parallel
@@ -159,4 +163,16 @@ export class TebexGateway {
       || error.message
     );
   }
+}
+
+// Tebex insists on a plain IPv4. Strip the IPv4-mapped IPv6 prefix
+// (`::ffff:1.2.3.4` — what Node hands us when the socket is dual-stack)
+// and fall through to a placeholder for pure IPv6, which Tebex would
+// reject outright otherwise.
+function extractIPv4(ip: string | undefined | null): string {
+  if (!ip) return '0.0.0.0';
+  const mapped = ip.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (mapped) return mapped[1]!;
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) return ip;
+  return '0.0.0.0';
 }
