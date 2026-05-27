@@ -12,6 +12,7 @@ export interface ProductDto {
   commands: string[];
   imageUrl: string;
   allowCustomCount: boolean;
+  forceDelivery: boolean;
   activePromotions: ProductPromotionDto[];
   discountPercent: number;
   discountedPrice: number;
@@ -30,6 +31,7 @@ export interface CreateProductDto {
   commands?: string[];
   imageUrl?: string;
   allowCustomCount: boolean;
+  forceDelivery?: boolean;
 }
 
 export interface UpdateProductDto {
@@ -41,4 +43,6 @@ export interface UpdateProductDto {
   type?: string;
   commands?: string[];
   imageUrl?: string;
+  allowCustomCount?: boolean;
+  forceDelivery?: boolean;
 }

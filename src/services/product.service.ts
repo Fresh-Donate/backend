@@ -31,6 +31,7 @@ function toDto(p: Product, now: Date = new Date()): ProductDto {
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
     allowCustomCount: p.allowCustomCount,
+    forceDelivery: p.forceDelivery,
     activePromotions: active,
     discountPercent: percent,
     discountedPrice: applyDiscount(price, percent),
@@ -77,6 +78,7 @@ export class ProductService {
       commands: data.commands || [],
       imageUrl: data.imageUrl || '',
       allowCustomCount: data.allowCustomCount || false,
+      forceDelivery: data.forceDelivery || false,
     });
     return toDto(product);
   }
@@ -108,6 +110,8 @@ export class ProductService {
       type: source.type,
       commands: [...source.commands],
       imageUrl: source.imageUrl,
+      allowCustomCount: source.allowCustomCount,
+      forceDelivery: source.forceDelivery,
     });
 
     return toDto(product);
