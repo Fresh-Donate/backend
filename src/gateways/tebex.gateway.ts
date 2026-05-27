@@ -19,6 +19,37 @@ const TEBEX_HEADLESS_API_URL = 'https://headless.tebex.io/api';
 // types — the link only materialises once items are added).
 const TEBEX_CHECKOUT_URL = (ident: string) => `https://checkout.tebex.io/checkout/${ident}`;
 
+// Tebex Headless for Minecraft validates `username` against Mojang. Offline-
+// mode servers and players whose nick isn't a premium account get rejected
+// with 404 "Invalid Username provided" and the whole basket fails.
+//
+// To keep checkout working we retry with a known-valid premium nick from
+// this list. The *real* nickname continues to live in `payment.customer_
+// nickname` and `basket.custom.payment_id`, which is what delivery uses -
+// the fake one only exists to satisfy Tebex's Mojang lookup.
+//
+// Picked from well-known Mojang/Minecraft staff accounts that have existed
+// for years and won't suddenly disappear.
+const PREMIUM_FALLBACK_NICKS = [
+  '_zaralX_',
+  'Vifoxy',
+  'BrainzoRR',
+  'Barn0',
+  'Dream',
+  'Joas',
+  'JOASN',
+  'MoxN',
+  'bravesnake',
+  'Noczx',
+  'Yandex',
+  'Coder',
+  'aul1008',
+  'Elsham1r',
+  'Aylol',
+  'Mador2',
+  'dees0',
+];
+
 // Tebex Headless API: low-level endpoints to build a basket from existing
 // catalogue packages, returning a checkout URL. Auth = HTTP Basic over the
 // webstore's public token (username) and the project's private key
@@ -169,13 +200,39 @@ export class TebexGateway {
       `[tebex] createCheckout payment=${params.paymentId} amount=${params.amount} plan=[${plan.map((p) => `${p.quantity}×${p.denomination}`).join(', ')}]`,
     );
 
-    const basket = await this.createBasket({
-      paymentId: params.paymentId,
-      completeUrl: params.completeUrl,
-      cancelUrl: params.cancelUrl,
-      username: params.username,
-      ipAddress: params.ipAddress,
-    });
+    let basket: TebexBasketResponse['data'];
+    try {
+      basket = await this.createBasket({
+        paymentId: params.paymentId,
+        completeUrl: params.completeUrl,
+        cancelUrl: params.cancelUrl,
+        username: params.username,
+        ipAddress: params.ipAddress,
+      });
+    } catch (error: any) {
+      // Mojang doesn't know this nick (offline-mode server or a typo on a
+      // premium one) — retry with a known-good premium nick so the basket
+      // can still be created. The real nickname stays in `basket.custom`,
+      // which is what we use to find the Payment row from the webhook and
+      // deliver to the actual player.
+      if (error instanceof PaymentError && error.code === 'TEBEX_INVALID_USERNAME') {
+        const fallback = PREMIUM_FALLBACK_NICKS[
+          Math.floor(Math.random() * PREMIUM_FALLBACK_NICKS.length)
+        ]!;
+        console.warn(
+          `[tebex] username "${params.username}" rejected by Mojang — retrying basket with fallback "${fallback}". Real nickname preserved for delivery.`,
+        );
+        basket = await this.createBasket({
+          paymentId: params.paymentId,
+          completeUrl: params.completeUrl,
+          cancelUrl: params.cancelUrl,
+          username: fallback,
+          ipAddress: params.ipAddress,
+        });
+      } else {
+        throw error;
+      }
+    }
 
     // Sequential — Tebex doesn't document a bulk-add endpoint and parallel
     // POSTs to the same basket would race the server-side total.
