@@ -13,6 +13,12 @@ import type {
 
 const TEBEX_HEADLESS_API_URL = 'https://headless.tebex.io/api';
 
+// Stable hosted-checkout URL pattern Tebex uses across Headless responses.
+// We fall back to building it from `ident` when the response omits
+// `links.checkout` (happens on freshly-created empty baskets for some store
+// types — the link only materialises once items are added).
+const TEBEX_CHECKOUT_URL = (ident: string) => `https://checkout.tebex.io/checkout/${ident}`;
+
 // Tebex Headless API: low-level endpoints to build a basket from existing
 // catalogue packages, returning a checkout URL. Auth = HTTP Basic over the
 // webstore's public token (username) and the project's private key
@@ -46,25 +52,63 @@ export class TebexGateway {
       ip_address: extractIPv4(params.ipAddress),
     };
 
+    console.log(
+      `[tebex] createBasket → payment=${params.paymentId} user=${params.username} ip=${body.ip_address}`,
+    );
+
     try {
-      const { data } = await this.client.post<TebexBasketResponse>(
+      const { data } = await this.client.post<any>(
         `/accounts/${this.webstoreToken}/baskets`,
         body,
       );
-      return data.data;
+
+      // Log the raw response shape — Tebex returns different envelopes for
+      // different store types, and the truncated dump makes future debugging
+      // possible without re-instrumenting the gateway.
+      console.log(
+        `[tebex] createBasket ← keys=${Object.keys(data || {}).join(',')} body=${JSON.stringify(data).slice(0, 500)}`,
+      );
+
+      // Headless wraps the basket in `{ data: { ... } }` for the generic
+      // store flow but returns the basket flat for Minecraft/Overwolf.
+      // Accept either shape.
+      const basket = data?.data ?? data;
+      if (!basket?.ident) {
+        throw new PaymentError(
+          `Tebex createBasket returned an unexpected payload: ${JSON.stringify(data).slice(0, 200)}`,
+          'TEBEX_CREATE_BASKET_ERROR',
+        );
+      }
+      console.log(
+        `[tebex] basket created ident=${basket.ident} checkoutLink=${basket.links?.checkout ?? '(none in response)'}`,
+      );
+      return basket as TebexBasketResponse['data'];
     } catch (error: any) {
+      if (error instanceof PaymentError) throw error;
       const detail = this.extractErrorMessage(error);
+      console.error(
+        `[tebex] createBasket failed status=${error.response?.status} body=${JSON.stringify(error.response?.data).slice(0, 500)}`,
+      );
       throw new PaymentError(`Tebex createBasket failed: ${detail}`, 'TEBEX_CREATE_BASKET_ERROR');
     }
   }
 
   async addPackage(basketIdent: string, packageId: string, quantity: number): Promise<void> {
     try {
-      await this.client.post(`/baskets/${basketIdent}/packages`, {
+      const { data } = await this.client.post<any>(`/baskets/${basketIdent}/packages`, {
         package_id: packageId,
         quantity,
       });
+      // Tebex returns the updated basket — surface the running total so the
+      // log shows the basket filling up line by line.
+      const updated = data?.data ?? data;
+      console.log(
+        `[tebex] addPackage ok basket=${basketIdent} pkg=${packageId} qty=${quantity} total=${updated?.total_price ?? updated?.value ?? '?'} ${updated?.currency ?? ''}`,
+      );
     } catch (error: any) {
+      console.error(
+        `[tebex] addPackage failed basket=${basketIdent} pkg=${packageId} qty=${quantity} status=${error.response?.status} body=${JSON.stringify(error.response?.data).slice(0, 500)}`,
+      );
       const detail = this.extractErrorMessage(error);
       throw new PaymentError(
         `Tebex addPackage failed (basket=${basketIdent} pkg=${packageId} qty=${quantity}): ${detail}`,
@@ -107,6 +151,10 @@ export class TebexGateway {
       );
     }
 
+    console.log(
+      `[tebex] createCheckout payment=${params.paymentId} amount=${params.amount} plan=[${plan.map((p) => `${p.quantity}×${p.denomination}`).join(', ')}]`,
+    );
+
     const basket = await this.createBasket({
       paymentId: params.paymentId,
       completeUrl: params.completeUrl,
@@ -121,11 +169,16 @@ export class TebexGateway {
       await this.addPackage(basket.ident, line.packageId, line.quantity);
     }
 
-    if (!basket.links?.checkout) {
-      throw new PaymentError('Tebex basket returned without a checkout URL', 'TEBEX_NO_CHECKOUT_URL');
-    }
+    // For Minecraft/Overwolf baskets `links.checkout` may be absent on the
+    // creation response (it gets populated server-side once items land).
+    // The hosted-checkout URL is deterministic from the basket ident, so
+    // build it ourselves rather than re-fetching the basket.
+    const checkoutUrl = basket.links?.checkout || TEBEX_CHECKOUT_URL(basket.ident);
+    console.log(
+      `[tebex] checkout ready payment=${params.paymentId} ident=${basket.ident} url=${checkoutUrl}`,
+    );
 
-    return { ident: basket.ident, checkoutUrl: basket.links.checkout };
+    return { ident: basket.ident, checkoutUrl };
   }
 
   // Tebex signs webhooks with HMAC-SHA256 over the *hex SHA256 of the raw
