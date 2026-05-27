@@ -19,13 +19,15 @@ import { Op, fn, col, literal } from 'sequelize';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
+import { TebexGateway } from '@/gateways/tebex.gateway';
 import { config } from '@/config';
-import { buildAmountInTargetSql, isSupportedCurrency } from '@/utils/currency';
+import { buildAmountInTargetSql, convert, isSupportedCurrency } from '@/utils/currency';
 import type {
   PaymentDto,
   CreatePaymentDto,
   UpgradeEvaluation,
   WataWebhookPayload,
+  TebexWebhookEnvelope,
 } from '@/types';
 
 function toDto(p: Payment): PaymentDto {
@@ -151,6 +153,7 @@ export class PaymentService {
     const productPrice = Math.round(finalUnit * count * 100) / 100;
     const productCurrency = product.currency;
     let paymentCurrency = productCurrency;
+    let chargedPrice = productPrice;
     let commissionPercent = 0;
     let commissionAmount = 0;
     let totalAmount = productPrice;
@@ -163,20 +166,26 @@ export class PaymentService {
           : provider.supportedCurrencies[0];
       }
 
+      chargedPrice = paymentCurrency === productCurrency
+        ? productPrice
+        : Math.round(
+          convert(productPrice, productCurrency, paymentCurrency, settings.currency_rates, settings.base_currency) * 100,
+        ) / 100;
+
       commissionPercent = Number(provider.commissionPercent) || 0;
-      commissionAmount = Math.round(productPrice * commissionPercent) / 100;
+      commissionAmount = Math.round(chargedPrice * commissionPercent) / 100;
 
       const rule = provider.commissionRule;
       if (rule.mode === 'buyer') {
-        totalAmount = productPrice + commissionAmount;
-        providerAmount = productPrice;
+        totalAmount = chargedPrice + commissionAmount;
+        providerAmount = chargedPrice;
       } else if (rule.mode === 'split') {
         const buyerShare = Math.round(commissionAmount * 50) / 100;
-        totalAmount = productPrice + buyerShare;
-        providerAmount = productPrice - (commissionAmount - buyerShare);
+        totalAmount = chargedPrice + buyerShare;
+        providerAmount = chargedPrice - (commissionAmount - buyerShare);
       } else {
-        totalAmount = productPrice;
-        providerAmount = productPrice - commissionAmount;
+        totalAmount = chargedPrice;
+        providerAmount = chargedPrice - commissionAmount;
       }
     }
 
@@ -218,7 +227,7 @@ export class PaymentService {
     });
 
     if (provider && provider.enabled) {
-      await this.createExternalPayment(payment, provider, product.name);
+      await this.createExternalPayment(payment, provider, product.name, data.customerIp);
     }
 
     const result = await Payment.findByPk(payment.id);
@@ -230,6 +239,7 @@ export class PaymentService {
     payment: Payment,
     provider: InstanceType<typeof PaymentProvider>,
     productName: string,
+    customerIp: string | undefined,
   ): Promise<void> {
     if (provider.providerId === 'yookassa') {
       const { shopId, secretKey } = provider.credentials;
@@ -317,6 +327,35 @@ export class PaymentService {
           ...payment.meta,
           wata: { testMode: provider.testMode },
         },
+      });
+    } else if (provider.providerId === 'tebex') {
+      const { webstoreToken, privateKey } = provider.credentials;
+      if (!webstoreToken || !privateKey) {
+        throw new PaymentError(
+          'Tebex credentials not configured. Set webstoreToken and privateKey in payment provider settings.',
+          'TEBEX_NOT_CONFIGURED',
+        );
+      }
+
+      const coinPackages = (provider.providerConfig?.coinPackages || {}) as Record<string, string>;
+
+      const gateway = new TebexGateway(webstoreToken, privateKey);
+      const returnUrl = config.payment.returnUrl;
+
+      const checkout = await gateway.createCheckout({
+        amount: Number(payment.totalAmount),
+        paymentId: payment.id,
+        completeUrl: `${returnUrl}?paymentId=${payment.id}`,
+        cancelUrl: `${returnUrl}?paymentId=${payment.id}&cancelled=1`,
+        coinPackages: coinPackages as any,
+        username: payment.customerNickname,
+        ipAddress: customerIp || '',
+      });
+
+      await payment.update({
+        providerId: provider.providerId,
+        externalPaymentId: checkout.ident,
+        externalPaymentUrl: checkout.checkoutUrl,
       });
     }
   }
@@ -531,6 +570,105 @@ export class PaymentService {
       paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
       console.log(`Wata: payment ${payment.id} declined (${payload.errorCode || 'unknown'})`);
+    }
+  }
+
+  // Tebex webhooks are wrapped as { id, type, date, subject }. We key off
+  // the `type` (payment.completed / declined / refunded) and look up the
+  // Payment by the `payment_id` we stashed in basket.custom at checkout
+  // creation. Falls back to matching by external transaction_id.
+  async handleTebexWebhook(envelope: TebexWebhookEnvelope): Promise<void> {
+    const { type, subject } = envelope;
+
+    // Tebex sends `validation.webhook` once when a new endpoint is added in
+    // their panel — no subject, nothing to process, just ack it.
+    if (type === 'validation.webhook' || !subject) {
+      return;
+    }
+
+    const customPaymentId = (subject.custom as Record<string, any> | undefined)?.payment_id
+      || subject.products?.[0]?.custom?.payment_id as string | undefined;
+
+    let payment: Payment | null = null;
+    if (customPaymentId) {
+      payment = await Payment.findByPk(String(customPaymentId));
+    }
+    if (!payment && subject.transaction_id) {
+      payment = await Payment.findOne({
+        where: { externalPaymentId: subject.transaction_id },
+      });
+    }
+    if (!payment) {
+      console.warn(
+        `Tebex webhook: payment not found (type=${type} tx=${subject.transaction_id} custom=${customPaymentId})`,
+      );
+      return;
+    }
+
+    if (type === 'payment.completed' && (payment.status === 'pending' || payment.status === 'expired')) {
+      const paidAmount = subject.price_paid?.amount ?? subject.price?.amount ?? Number(payment.totalAmount);
+      const gatewayFee = subject.fees?.gateway?.amount;
+
+      const updateData: Record<string, any> = {
+        status: 'paid',
+        paidAt: subject.settled_at ? new Date(subject.settled_at) : new Date(),
+        totalAmount: paidAmount,
+        currency: subject.price_paid?.currency || subject.price?.currency || payment.currency,
+        externalPaymentId: subject.transaction_id || payment.externalPaymentId,
+      };
+
+      if (gatewayFee !== undefined) {
+        updateData.commissionAmount = gatewayFee;
+        updateData.providerAmount = Math.round((paidAmount - gatewayFee) * 100) / 100;
+        updateData.commissionPercent = paidAmount > 0
+          ? Math.round((gatewayFee / paidAmount) * 10000) / 100
+          : 0;
+      }
+
+      updateData.meta = {
+        ...payment.meta,
+        tebex: {
+          transactionId: subject.transaction_id,
+          paymentMethod: subject.payment_method?.name,
+          customerEmail: subject.customer?.email,
+        },
+      };
+
+      await payment.update(updateData);
+      await this.deliveryService.attemptDelivery(payment.id);
+      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+
+      console.log(`Tebex: payment ${payment.id} completed (tx: ${subject.transaction_id})`);
+    } else if (type === 'payment.declined' && payment.status === 'pending') {
+      await payment.update({
+        status: 'failed',
+        meta: {
+          ...payment.meta,
+          cancelReason: subject.decline_reason?.code || 'declined',
+          tebex: {
+            transactionId: subject.transaction_id,
+            declineMessage: subject.decline_reason?.message,
+          },
+        },
+      });
+
+      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+
+      console.log(`Tebex: payment ${payment.id} declined (${subject.decline_reason?.code || 'unknown'})`);
+    } else if (type === 'payment.refunded' && (payment.status === 'paid' || payment.status === 'delivered')) {
+      await payment.update({
+        status: 'refunded',
+        meta: {
+          ...payment.meta,
+          tebex: {
+            ...((payment.meta as Record<string, any>).tebex || {}),
+            refundedAt: new Date().toISOString(),
+            transactionId: subject.transaction_id,
+          },
+        },
+      });
+
+      console.log(`Tebex: payment ${payment.id} refunded (tx: ${subject.transaction_id})`);
     }
   }
 

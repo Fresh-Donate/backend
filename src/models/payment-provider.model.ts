@@ -23,6 +23,12 @@ interface PaymentProviderAttributes {
   testMode: boolean;
   credentials: Record<string, string>;
   /**
+   * Structured provider-specific configuration that doesn't fit the flat
+   * string-keyed `credentials` map. Used by Tebex to store the mapping of
+   * coin-denomination → package_id for Headless API decomposition.
+   */
+  providerConfig: Record<string, any>;
+  /**
    * Default commission percent charged by the provider.
    *
    * Applied up-front to build an estimate at checkout time. The actual final
@@ -38,7 +44,7 @@ interface PaymentProviderAttributes {
 
 type PaymentProviderCreationAttributes = Optional<
   PaymentProviderAttributes,
-  'id' | 'enabled' | 'testMode' | 'credentials' | 'commissionPercent' | 'commissionRule' | 'createdAt' | 'updatedAt'
+  'id' | 'enabled' | 'testMode' | 'credentials' | 'providerConfig' | 'commissionPercent' | 'commissionRule' | 'createdAt' | 'updatedAt'
 >;
 
 @Table({ tableName: 'payment_providers' })
@@ -72,6 +78,10 @@ export class PaymentProvider extends BaseModel<PaymentProviderAttributes, Paymen
   @Default({})
   @Column(DataType.JSONB)
   declare credentials: Record<string, string>;
+
+  @Default({})
+  @Column(DataType.JSONB)
+  declare providerConfig: Record<string, any>;
 
   /**
    * Default commission percent (0–100). Used as the up-front estimate when
