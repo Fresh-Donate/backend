@@ -1,14 +1,17 @@
 import crypto from 'crypto';
 import { Settings } from '@/models/settings.model';
+import { PaymentProvider } from '@/models/payment-provider.model';
 import {
   SUPPORTED_CURRENCIES,
   DEFAULT_BASE_CURRENCY,
   defaultRatesFor,
   isSupportedCurrency,
+  convert,
   type CurrencyRates,
   type SupportedCurrency,
 } from '@/utils/currency';
 import type { SettingsDto } from '@/types';
+import { MIN_AMOUNT_LOWER, MIN_AMOUNT_UPPER } from '@/types/payment-provider';
 
 function generateToken(): string {
   return crypto.randomBytes(32).toString('hex').slice(0, 32);
@@ -111,13 +114,13 @@ export class SettingsService {
     const currentBase: SupportedCurrency = isSupportedCurrency(settings.base_currency)
       ? settings.base_currency
       : DEFAULT_BASE_CURRENCY;
+
+    const ratesBeforeUpdate: CurrencyRates = fillRatesForBase(settings.currency_rates, currentBase);
     const requestedBase = data.base_currency;
     const nextBase: SupportedCurrency =
       requestedBase !== undefined && isSupportedCurrency(requestedBase) ? requestedBase : currentBase;
     const baseChanged = nextBase !== currentBase;
 
-    // Old rates are "X per 1 unit of OLD_BASE" — meaningless under the new
-    // base. Replace with defaults rather than try to migrate.
     const startingRates = baseChanged ? defaultRatesFor(nextBase) : (settings.currency_rates ?? {});
     const patchRates = normalizeCurrencyRates(data.currency_rates, nextBase);
     const nextRates = patchRates ? { ...startingRates, ...patchRates } : startingRates;
@@ -132,6 +135,28 @@ export class SettingsService {
 
     await settings.update(patch);
 
+    if (baseChanged) {
+      await rebaseProviderMinAmounts(currentBase, nextBase, ratesBeforeUpdate);
+    }
+
     return toDto(settings);
+  }
+}
+
+async function rebaseProviderMinAmounts(
+  oldBase: SupportedCurrency,
+  newBase: SupportedCurrency,
+  oldRates: CurrencyRates,
+): Promise<void> {
+  const providers = await PaymentProvider.findAll();
+  for (const provider of providers) {
+    const current = Number(provider.minAmount);
+    if (!Number.isFinite(current) || current <= 0) continue;
+    const converted = convert(current, oldBase, newBase, oldRates, oldBase);
+    const rounded = Math.round(converted * 100) / 100;
+    const clamped = Math.min(MIN_AMOUNT_UPPER, Math.max(MIN_AMOUNT_LOWER, rounded));
+    if (clamped !== current) {
+      await provider.update({ minAmount: clamped });
+    }
   }
 }

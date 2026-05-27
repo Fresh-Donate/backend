@@ -13,6 +13,7 @@ export interface PaymentProviderDto {
   commissionPercent: number;
   commissionRule: CommissionRuleData;
   supportedCurrencies: string[];
+  minAmount: number;
 }
 
 export interface UpdatePaymentProviderDto {
@@ -23,4 +24,8 @@ export interface UpdatePaymentProviderDto {
   commissionPercent?: number;
   commissionRule?: CommissionRuleData;
   supportedCurrencies?: string[];
+  minAmount?: number;
 }
+
+export const MIN_AMOUNT_LOWER = 0.01;
+export const MIN_AMOUNT_UPPER = 10000;

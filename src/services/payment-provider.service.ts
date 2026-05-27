@@ -79,17 +79,13 @@ function toDto(p: PaymentProvider): PaymentProviderDto {
     commissionPercent: Number(p.commissionPercent),
     commissionRule: p.commissionRule,
     supportedCurrencies: p.supportedCurrencies,
+    minAmount: Number(p.minAmount),
   };
 }
 
 export class PaymentProviderService {
   private seeded = false;
 
-  // Idempotent per-provider seed: missing providers are inserted, existing
-  // ones get their description/icon refreshed and any missing
-  // credential / providerConfig keys backfilled. Lets new fields (e.g.
-  // tebex.webstoreToken) appear on already-seeded installations without a
-  // manual migration.
   private async seed(): Promise<void> {
     if (this.seeded) return;
 
@@ -106,9 +102,7 @@ export class PaymentProviderService {
         continue;
       }
 
-      // Backfill missing credential / providerConfig keys without clobbering
-      // already-entered values. Refresh description/icon to whatever the
-      // current build says (admins don't edit those).
+      // Backfill missing credential / providerConfig keys
       const mergedCredentials: Record<string, string> = { ...def.credentials, ...(current.credentials || {}) };
       const mergedProviderConfig = mergeProviderConfig(def.providerConfig, current.providerConfig);
 
@@ -153,10 +147,6 @@ export class PaymentProviderService {
   }
 }
 
-// Shallow-merge default shape into the persisted config so new keys (e.g. a
-// brand-new coin denomination) appear without overwriting the admin's existing
-// values. One level deep — enough for tebex.coinPackages without inviting
-// nested-merge surprises down the road.
 function mergeProviderConfig(
   defaults: Record<string, any>,
   current: Record<string, any> | undefined,

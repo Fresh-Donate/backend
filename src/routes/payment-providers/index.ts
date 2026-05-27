@@ -1,6 +1,7 @@
 import { type FastifyPluginAsync } from 'fastify';
 import { PaymentProviderService } from '@/services/payment-provider.service';
 import type { UpdatePaymentProviderDto } from '@/types';
+import { MIN_AMOUNT_LOWER, MIN_AMOUNT_UPPER } from '@/types/payment-provider';
 
 const paymentProviderRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentProviderService();
@@ -39,6 +40,11 @@ const paymentProviderRoutes: FastifyPluginAsync = async (fastify): Promise<void>
           supportedCurrencies: {
             type: 'array' as const,
             items: { type: 'string' as const },
+          },
+          minAmount: {
+            type: 'number' as const,
+            minimum: MIN_AMOUNT_LOWER,
+            maximum: MIN_AMOUNT_UPPER,
           },
         },
       },
