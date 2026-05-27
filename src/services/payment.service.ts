@@ -21,7 +21,7 @@ import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
 import { TebexGateway } from '@/gateways/tebex.gateway';
 import { config } from '@/config';
-import { buildAmountInTargetSql, convert, isSupportedCurrency } from '@/utils/currency';
+import { buildAmountInTargetSql, convert, toBaseCurrency, isSupportedCurrency } from '@/utils/currency';
 import type {
   PaymentDto,
   CreatePaymentDto,
@@ -171,6 +171,21 @@ export class PaymentService {
         : Math.round(
           convert(productPrice, productCurrency, paymentCurrency, settings.currency_rates, settings.base_currency) * 100,
         ) / 100;
+
+      const minAmount = Number(provider.minAmount) || 0;
+      if (minAmount > 0) {
+        const chargedInBase = toBaseCurrency(
+          chargedPrice,
+          paymentCurrency,
+          settings.currency_rates,
+          settings.base_currency,
+        );
+        if (chargedInBase + 1e-9 < minAmount) {
+          throw new ValidationError(
+            `Минимальная сумма для оплаты через ${provider.name} — ${minAmount} ${settings.base_currency}.`,
+          );
+        }
+      }
 
       commissionPercent = Number(provider.commissionPercent) || 0;
       commissionAmount = Math.round(chargedPrice * commissionPercent) / 100;
