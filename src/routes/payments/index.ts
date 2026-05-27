@@ -37,7 +37,9 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       },
     },
   }, async (request, reply) => {
-    const payment = await service.create(request.body);
+    const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
+    const customerIp = forwardedFor || request.ip || '';
+    const payment = await service.create({ ...request.body, customerIp });
     return reply.code(201).send(payment);
   });
 

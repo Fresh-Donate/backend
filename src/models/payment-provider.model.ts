@@ -23,6 +23,12 @@ interface PaymentProviderAttributes {
   testMode: boolean;
   credentials: Record<string, string>;
   /**
+   * Structured provider-specific configuration that doesn't fit the flat
+   * string-keyed `credentials` map. Used by Tebex to store the mapping of
+   * coin-denomination → package_id for Headless API decomposition.
+   */
+  providerConfig: Record<string, any>;
+  /**
    * Default commission percent charged by the provider.
    *
    * Applied up-front to build an estimate at checkout time. The actual final
@@ -32,13 +38,15 @@ interface PaymentProviderAttributes {
   commissionPercent: number;
   commissionRule: CommissionRuleData;
   supportedCurrencies: string[];
+  // Minimum acceptable payment amount
+  minAmount: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
 type PaymentProviderCreationAttributes = Optional<
   PaymentProviderAttributes,
-  'id' | 'enabled' | 'testMode' | 'credentials' | 'commissionPercent' | 'commissionRule' | 'createdAt' | 'updatedAt'
+  'id' | 'enabled' | 'testMode' | 'credentials' | 'providerConfig' | 'commissionPercent' | 'commissionRule' | 'minAmount' | 'createdAt' | 'updatedAt'
 >;
 
 @Table({ tableName: 'payment_providers' })
@@ -60,11 +68,6 @@ export class PaymentProvider extends BaseModel<PaymentProviderAttributes, Paymen
   @Column(DataType.BOOLEAN)
   declare enabled: boolean;
 
-  /**
-   * When true, the provider talks to its sandbox / test environment.
-   * Not all providers support a sandbox — gateways that ignore this flag
-   * will simply behave as in production.
-   */
   @Default(false)
   @Column(DataType.BOOLEAN)
   declare testMode: boolean;
@@ -73,10 +76,10 @@ export class PaymentProvider extends BaseModel<PaymentProviderAttributes, Paymen
   @Column(DataType.JSONB)
   declare credentials: Record<string, string>;
 
-  /**
-   * Default commission percent (0–100). Used as the up-front estimate when
-   * creating a payment; overwritten by real values from webhook data.
-   */
+  @Default({})
+  @Column(DataType.JSONB)
+  declare providerConfig: Record<string, any>;
+
   @Default(0)
   @Column(DataType.DECIMAL(5, 2))
   declare commissionPercent: number;
@@ -88,4 +91,8 @@ export class PaymentProvider extends BaseModel<PaymentProviderAttributes, Paymen
   @Default([])
   @Column(DataType.JSONB)
   declare supportedCurrencies: string[];
+
+  @Default(0.01)
+  @Column(DataType.DECIMAL(10, 2))
+  declare minAmount: number;
 }

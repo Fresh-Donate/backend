@@ -3,6 +3,7 @@ import { PaymentService } from '@/services/payment.service';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
+import { TebexGateway } from '@/gateways/tebex.gateway';
 import { PaymentProvider } from '@/models/payment-provider.model';
 
 const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
@@ -171,6 +172,63 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     }
 
     return reply.code(200).send({ status: 'ok' });
+  });
+
+  // Tebex: HMAC-SHA256 over hex(SHA256(rawBody)) keyed by webhookSecret,
+  // delivered in X-Signature. When admin first registers the endpoint in
+  // the Tebex panel, Tebex sends a `validation.webhook` event and expects
+  // us to echo back its `id` in the JSON response body — otherwise the
+  // endpoint stays in "Cannot be validated" state. Real payment events
+  // accept any 2xx ack.
+  fastify.post<{ Body: Record<string, any> }>('/tebex', {
+    config: { rateLimit: { max: 200, timeWindow: 60000 } },
+  }, async (request, reply) => {
+    const provider = await PaymentProvider.findOne({ where: { providerId: 'tebex' } });
+    if (!provider) {
+      request.log.error('Tebex webhook: provider not found in database');
+      return reply.code(200).send({ status: 'ok' });
+    }
+
+    const webhookSecret = provider.credentials.webhookSecret;
+    const rawBody: Buffer | undefined = (request as any).rawBody;
+    const signature = request.headers['x-signature'] as string | undefined;
+
+    const skipSig = process.env.NODE_ENV === 'development'
+      || process.env.TEBEX_SKIP_SIGNATURE_CHECK === 'true';
+
+    if (!skipSig) {
+      if (!webhookSecret) {
+        request.log.warn('Tebex webhook rejected: webhookSecret not configured');
+        return reply.code(403).send({ error: 'Not configured' });
+      }
+      if (!rawBody) {
+        request.log.warn('Tebex webhook rejected: raw body unavailable');
+        return reply.code(400).send({ error: 'Bad request' });
+      }
+      const ok = TebexGateway.verifyWebhookSignature(rawBody, signature, webhookSecret);
+      if (!ok) {
+        request.log.warn('Tebex webhook rejected: invalid signature');
+        return reply.code(403).send({ error: 'Invalid signature' });
+      }
+    }
+
+    const payload = (request.body || {}) as any;
+    request.log.info(
+      `Tebex webhook: type=${payload.type} id=${payload.id} tx=${payload.subject?.transaction_id}`,
+    );
+
+    // Validation handshake — must echo back the envelope id, nothing else.
+    if (payload.type === 'validation.webhook') {
+      return reply.code(200).send({ id: payload.id });
+    }
+
+    try {
+      await paymentService.handleTebexWebhook(payload);
+    } catch (error: any) {
+      request.log.error(`Tebex webhook processing error: ${error.message}`);
+    }
+
+    return reply.code(200).send({ id: payload.id });
   });
 };
 
