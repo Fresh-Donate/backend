@@ -85,10 +85,24 @@ export class TebexGateway {
       return basket as TebexBasketResponse['data'];
     } catch (error: any) {
       if (error instanceof PaymentError) throw error;
-      const detail = this.extractErrorMessage(error);
+      const status = error.response?.status;
+      const responseTitle = error.response?.data?.title;
       console.error(
-        `[tebex] createBasket failed status=${error.response?.status} body=${JSON.stringify(error.response?.data).slice(0, 500)}`,
+        `[tebex] createBasket failed status=${status} body=${JSON.stringify(error.response?.data).slice(0, 500)}`,
       );
+
+      // Tebex validates the username against Mojang; offline-mode and typo'd
+      // premium nicks fail with 404 + this exact title. Surface a buyer-
+      // friendly message so the shop UI can render something useful instead
+      // of "request 404".
+      if (status === 404 && responseTitle === 'Invalid Username provided') {
+        throw new PaymentError(
+          `Tebex не принимает ник "${params.username}" — он не найден в Mojang. Tebex работает только с премиум-никами Minecraft. Проверьте написание ника или выберите другой способ оплаты.`,
+          'TEBEX_INVALID_USERNAME',
+        );
+      }
+
+      const detail = this.extractErrorMessage(error);
       throw new PaymentError(`Tebex createBasket failed: ${detail}`, 'TEBEX_CREATE_BASKET_ERROR');
     }
   }
