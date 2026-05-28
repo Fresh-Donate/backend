@@ -887,6 +887,13 @@ export class PaymentService {
       'total_amount',
       'currency',
     );
+    const commissionInTarget = buildAmountInTargetSql(
+      settings.currency_rates,
+      settings.base_currency,
+      target,
+      'commission_amount',
+      'currency',
+    );
 
     const dailyTrunc = "date_trunc('day', paid_at)";
     const paidStatuses = { [Op.in]: ['paid', 'delivered'] as PaymentStatus[] };
@@ -899,8 +906,8 @@ export class PaymentService {
       paidAt: { [Op.gte]: prevFrom, [Op.lte]: prevTo },
     };
 
-    type DailyRow = { date: string; amount: string; count: string; customers: string };
-    type AggRow = { amount: string; count: string; customers: string } | null;
+    type DailyRow = { date: string; amount: string; commission: string; count: string; customers: string };
+    type AggRow = { amount: string; commission: string; count: string; customers: string } | null;
     type ProviderRow = { providerId: string | null; amount: string; count: string };
     type ProductRow = { productId: string; productName: string; amount: string; count: string };
 
@@ -909,6 +916,7 @@ export class PaymentService {
         attributes: [
           [literal(dailyTrunc), 'date'],
           [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COALESCE', fn('SUM', literal(commissionInTarget)), 0), 'commission'],
           [fn('COUNT', col('id')), 'count'],
           [literal('COUNT(DISTINCT customer_nickname)'), 'customers'],
         ],
@@ -920,6 +928,7 @@ export class PaymentService {
       Payment.findOne({
         attributes: [
           [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COALESCE', fn('SUM', literal(commissionInTarget)), 0), 'commission'],
           [fn('COUNT', col('id')), 'count'],
           [literal('COUNT(DISTINCT customer_nickname)'), 'customers'],
         ],
@@ -929,6 +938,7 @@ export class PaymentService {
       Payment.findOne({
         attributes: [
           [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COALESCE', fn('SUM', literal(commissionInTarget)), 0), 'commission'],
           [fn('COUNT', col('id')), 'count'],
           [literal('COUNT(DISTINCT customer_nickname)'), 'customers'],
         ],
@@ -961,11 +971,13 @@ export class PaymentService {
     ])) as unknown as [DailyRow[], AggRow, AggRow, ProviderRow[], ProductRow[]];
 
     const amountByDay = new Map<string, number>();
+    const commissionByDay = new Map<string, number>();
     const countByDay = new Map<string, number>();
     const customersByDay = new Map<string, number>();
     for (const row of dailyRows) {
       const dayKey = new Date(row.date).toISOString().slice(0, 10);
       amountByDay.set(dayKey, Number(row.amount) || 0);
+      commissionByDay.set(dayKey, Number(row.commission) || 0);
       countByDay.set(dayKey, Number(row.count) || 0);
       customersByDay.set(dayKey, Number(row.customers) || 0);
     }
@@ -974,6 +986,7 @@ export class PaymentService {
     const round2 = (n: number): number => Math.round(n * 100) / 100;
 
     const revenueSparkline = days.map((d) => round2(amountByDay.get(d) || 0));
+    const commissionSparkline = days.map((d) => round2(commissionByDay.get(d) || 0));
     const countSparkline = days.map((d) => countByDay.get(d) || 0);
     const customersSparkline = days.map((d) => customersByDay.get(d) || 0);
     const avgSparkline = days.map((d) => {
@@ -983,11 +996,13 @@ export class PaymentService {
     });
 
     const curRevenue = Number(currentAgg?.amount) || 0;
+    const curCommission = Number(currentAgg?.commission) || 0;
     const curCount = Number(currentAgg?.count) || 0;
     const curCustomers = Number(currentAgg?.customers) || 0;
     const curAvg = curCount > 0 ? curRevenue / curCount : 0;
 
     const prevRevenue = Number(prevAgg?.amount) || 0;
+    const prevCommission = Number(prevAgg?.commission) || 0;
     const prevCount = Number(prevAgg?.count) || 0;
     const prevCustomers = Number(prevAgg?.customers) || 0;
     const prevAvg = prevCount > 0 ? prevRevenue / prevCount : 0;
@@ -998,6 +1013,11 @@ export class PaymentService {
         current: round2(curRevenue),
         previous: round2(prevRevenue),
         sparkline: revenueSparkline,
+      },
+      commission: {
+        current: round2(curCommission),
+        previous: round2(prevCommission),
+        sparkline: commissionSparkline,
       },
       customers: {
         current: curCustomers,
