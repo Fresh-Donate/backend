@@ -134,7 +134,7 @@ export class PaymentService {
       }
     }
 
-    // Pricing order: promo → upgrade «доплата» → multiply by count. Same
+    // Pricing order: promo → upgrade "доплата" → multiply by count. Same
     // evaluator as /preview, so what the modal showed is what we charge.
     const upgradeEval = await this.upgradePricingService.evaluate(data.nickname, product.id);
     if (upgradeEval.blocked) {
