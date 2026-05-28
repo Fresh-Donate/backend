@@ -626,7 +626,7 @@ export class PaymentService {
 
       const updateData: Record<string, any> = {
         status: 'paid',
-        paidAt: subject.settled_at ? new Date(subject.settled_at) : new Date(),
+        paidAt: new Date(),
         totalAmount: paidAmount,
         currency: subject.price_paid?.currency || subject.price?.currency || payment.currency,
         externalPaymentId: subject.transaction_id || payment.externalPaymentId,
