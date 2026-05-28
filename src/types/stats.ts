@@ -1,0 +1,28 @@
+export interface MetricSeries {
+  current: number;
+  previous: number;
+  sparkline: number[];
+}
+
+export interface ProviderSummary {
+  providerId: string | null;
+  count: number;
+  amount: number;
+}
+
+export interface ProductSummary {
+  productId: string;
+  productName: string;
+  count: number;
+  amount: number;
+}
+
+export interface StatsSummary {
+  currency: string;
+  revenue: MetricSeries;
+  customers: MetricSeries;
+  avgOrder: MetricSeries;
+  payments: MetricSeries;
+  paymentProviders: ProviderSummary[];
+  topProducts: ProductSummary[];
+}

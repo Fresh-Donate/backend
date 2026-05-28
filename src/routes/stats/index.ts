@@ -23,6 +23,15 @@ const statsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       currency,
     });
   });
+
+  fastify.get<{
+    Querystring: { from: string; to: string; currency?: string };
+  }>('/summary', {
+    onRequest: [fastify.authenticate],
+  }, async (request) => {
+    const { from, to, currency } = request.query;
+    return paymentService.getSummary({ from, to, currency });
+  });
 };
 
 export default statsRoutes;

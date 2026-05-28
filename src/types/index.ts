@@ -14,3 +14,4 @@ export * from './yookassa';
 export * from './heleket';
 export * from './wata';
 export * from './tebex';
+export * from './stats';

@@ -28,6 +28,7 @@ import type {
   UpgradeEvaluation,
   WataWebhookPayload,
   TebexWebhookEnvelope,
+  StatsSummary,
 } from '@/types';
 
 function toDto(p: Payment): PaymentDto {
@@ -858,4 +859,183 @@ export class PaymentService {
       count: Number(r.count) || 0,
     }));
   }
+
+  async getSummary(options: {
+    from: string;
+    to: string;
+    currency?: string;
+  }): Promise<StatsSummary> {
+    const { from, to, currency } = options;
+
+    const settings = await this.settingsService.get();
+    const requested = currency?.toUpperCase();
+    const target =
+      requested && isSupportedCurrency(requested) ? requested : settings.base_currency;
+
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    const lengthMs = Math.max(0, toDate.getTime() - fromDate.getTime());
+    // Previous window ends just before current starts (1ms gap to avoid
+    // double-counting an edge payment) and has the same length.
+    const prevTo = new Date(fromDate.getTime() - 1);
+    const prevFrom = new Date(prevTo.getTime() - lengthMs);
+
+    const amountInTarget = buildAmountInTargetSql(
+      settings.currency_rates,
+      settings.base_currency,
+      target,
+      'total_amount',
+      'currency',
+    );
+
+    const dailyTrunc = "date_trunc('day', paid_at)";
+    const paidStatuses = { [Op.in]: ['paid', 'delivered'] as PaymentStatus[] };
+    const currentWhere = {
+      status: paidStatuses,
+      paidAt: { [Op.gte]: fromDate, [Op.lte]: toDate },
+    };
+    const prevWhere = {
+      status: paidStatuses,
+      paidAt: { [Op.gte]: prevFrom, [Op.lte]: prevTo },
+    };
+
+    type DailyRow = { date: string; amount: string; count: string; customers: string };
+    type AggRow = { amount: string; count: string; customers: string } | null;
+    type ProviderRow = { providerId: string | null; amount: string; count: string };
+    type ProductRow = { productId: string; productName: string; amount: string; count: string };
+
+    const [dailyRows, currentAgg, prevAgg, providerRows, productRows] = (await Promise.all([
+      Payment.findAll({
+        attributes: [
+          [literal(dailyTrunc), 'date'],
+          [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COUNT', col('id')), 'count'],
+          [literal('COUNT(DISTINCT customer_nickname)'), 'customers'],
+        ],
+        where: currentWhere,
+        group: [literal(dailyTrunc)] as any,
+        order: [[literal(dailyTrunc), 'ASC']] as any,
+        raw: true,
+      }),
+      Payment.findOne({
+        attributes: [
+          [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COUNT', col('id')), 'count'],
+          [literal('COUNT(DISTINCT customer_nickname)'), 'customers'],
+        ],
+        where: currentWhere,
+        raw: true,
+      }),
+      Payment.findOne({
+        attributes: [
+          [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COUNT', col('id')), 'count'],
+          [literal('COUNT(DISTINCT customer_nickname)'), 'customers'],
+        ],
+        where: prevWhere,
+        raw: true,
+      }),
+      Payment.findAll({
+        attributes: [
+          'providerId',
+          [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COUNT', col('id')), 'count'],
+        ],
+        where: currentWhere,
+        group: ['providerId'],
+        raw: true,
+      }),
+      Payment.findAll({
+        attributes: [
+          'productId',
+          'productName',
+          [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COUNT', col('id')), 'count'],
+        ],
+        where: currentWhere,
+        group: ['productId', 'productName'],
+        order: [[fn('SUM', literal(amountInTarget)), 'DESC']] as any,
+        limit: 10,
+        raw: true,
+      }),
+    ])) as unknown as [DailyRow[], AggRow, AggRow, ProviderRow[], ProductRow[]];
+
+    const amountByDay = new Map<string, number>();
+    const countByDay = new Map<string, number>();
+    const customersByDay = new Map<string, number>();
+    for (const row of dailyRows) {
+      const dayKey = new Date(row.date).toISOString().slice(0, 10);
+      amountByDay.set(dayKey, Number(row.amount) || 0);
+      countByDay.set(dayKey, Number(row.count) || 0);
+      customersByDay.set(dayKey, Number(row.customers) || 0);
+    }
+
+    const days = eachDayUtc(fromDate, toDate);
+    const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+    const revenueSparkline = days.map((d) => round2(amountByDay.get(d) || 0));
+    const countSparkline = days.map((d) => countByDay.get(d) || 0);
+    const customersSparkline = days.map((d) => customersByDay.get(d) || 0);
+    const avgSparkline = days.map((d) => {
+      const amt = amountByDay.get(d) || 0;
+      const cnt = countByDay.get(d) || 0;
+      return cnt > 0 ? round2(amt / cnt) : 0;
+    });
+
+    const curRevenue = Number(currentAgg?.amount) || 0;
+    const curCount = Number(currentAgg?.count) || 0;
+    const curCustomers = Number(currentAgg?.customers) || 0;
+    const curAvg = curCount > 0 ? curRevenue / curCount : 0;
+
+    const prevRevenue = Number(prevAgg?.amount) || 0;
+    const prevCount = Number(prevAgg?.count) || 0;
+    const prevCustomers = Number(prevAgg?.customers) || 0;
+    const prevAvg = prevCount > 0 ? prevRevenue / prevCount : 0;
+
+    return {
+      currency: target,
+      revenue: {
+        current: round2(curRevenue),
+        previous: round2(prevRevenue),
+        sparkline: revenueSparkline,
+      },
+      customers: {
+        current: curCustomers,
+        previous: prevCustomers,
+        sparkline: customersSparkline,
+      },
+      avgOrder: {
+        current: round2(curAvg),
+        previous: round2(prevAvg),
+        sparkline: avgSparkline,
+      },
+      payments: {
+        current: curCount,
+        previous: prevCount,
+        sparkline: countSparkline,
+      },
+      paymentProviders: providerRows.map((p) => ({
+        providerId: p.providerId,
+        count: Number(p.count) || 0,
+        amount: round2(Number(p.amount) || 0),
+      })),
+      topProducts: productRows.map((p) => ({
+        productId: p.productId,
+        productName: p.productName,
+        count: Number(p.count) || 0,
+        amount: round2(Number(p.amount) || 0),
+      })),
+    };
+  }
+}
+
+function eachDayUtc(from: Date, to: Date): string[] {
+  const days: string[] = [];
+  const cur = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+  const end = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()));
+  while (cur <= end) {
+    days.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return days;
 }
