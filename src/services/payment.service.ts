@@ -804,14 +804,10 @@ export class PaymentService {
     };
   }
 
-  // Cross-currency revenue chart: each row's amount is converted in SQL to
-  // the target currency (via admin currency_rates), so the DB returns one
-  // comparable number per bucket. Falls back to base currency when the
-  // requested code is unsupported.
   async getRevenueChart(options: {
     from: string;
     to: string;
-    period: 'daily' | 'weekly' | 'monthly';
+    period: 'hourly' | 'daily' | 'weekly' | 'monthly';
     currency?: string;
   }): Promise<{ date: string; amount: number; count: number }[]> {
     const { from, to, period, currency } = options;
@@ -825,7 +821,9 @@ export class PaymentService {
       ? "date_trunc('month', paid_at)"
       : period === 'weekly'
         ? "date_trunc('week', paid_at)"
-        : "date_trunc('day', paid_at)";
+        : period === 'hourly'
+          ? "date_trunc('hour', paid_at)"
+          : "date_trunc('day', paid_at)";
 
     const amountInTarget = buildAmountInTargetSql(
       settings.currency_rates,

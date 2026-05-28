@@ -19,7 +19,7 @@ const statsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return paymentService.getRevenueChart({
       from,
       to,
-      period: (period as 'daily' | 'weekly' | 'monthly') || 'daily',
+      period: (period as 'hourly' | 'daily' | 'weekly' | 'monthly') || 'daily',
       currency,
     });
   });
