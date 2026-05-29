@@ -20,6 +20,7 @@ import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
 import { TebexGateway } from '@/gateways/tebex.gateway';
+import { CryptoBotGateway } from '@/gateways/cryptobot.gateway';
 import { config } from '@/config';
 import { buildAmountInTargetSql, convert, toBaseCurrency, isSupportedCurrency } from '@/utils/currency';
 import type {
@@ -28,6 +29,8 @@ import type {
   UpgradeEvaluation,
   WataWebhookPayload,
   TebexWebhookEnvelope,
+  CryptoBotWebhookUpdate,
+  CryptoBotFiat,
   StatsSummary,
 } from '@/types';
 
@@ -344,6 +347,46 @@ export class PaymentService {
           wata: { testMode: provider.testMode },
         },
       });
+    } else if (provider.providerId === 'cryptobot') {
+      const { apiToken } = provider.credentials;
+      if (!apiToken) {
+        throw new PaymentError(
+          'CryptoBot credentials not configured. Set apiToken in payment provider settings.',
+          'CRYPTOBOT_NOT_CONFIGURED',
+        );
+      }
+
+      const gateway = new CryptoBotGateway(apiToken, provider.testMode);
+      const returnUrl = config.payment.returnUrl;
+
+      const invoice = await gateway.createInvoice({
+        currencyType: 'fiat',
+        fiat: payment.currency as CryptoBotFiat,
+        amount: Number(payment.totalAmount),
+        description: `${productName} — FreshDonate`,
+        payload: payment.id,
+        paidBtnName: 'callback',
+        paidBtnUrl: `${returnUrl}?paymentId=${payment.id}`,
+        expiresIn: 3600,
+      });
+
+      const payUrl = CryptoBotGateway.pickPayUrl(invoice);
+      if (!payUrl) {
+        throw new PaymentError(
+          'CryptoBot did not return a pay URL',
+          'CRYPTOBOT_CREATE_ERROR',
+        );
+      }
+
+      await payment.update({
+        providerId: provider.providerId,
+        externalPaymentId: String(invoice.invoice_id),
+        externalPaymentUrl: payUrl,
+        meta: {
+          ...payment.meta,
+          cryptobot: { testMode: provider.testMode, hash: invoice.hash },
+        },
+      });
     } else if (provider.providerId === 'tebex') {
       const { webstoreToken, privateKey } = provider.credentials;
       if (!webstoreToken || !privateKey) {
@@ -512,6 +555,63 @@ export class PaymentService {
 
       console.log(`Heleket: payment ${payment.id} failed with status ${status} (uuid: ${payload.uuid})`);
     }
+  }
+
+  async handleCryptoBotWebhook(update: CryptoBotWebhookUpdate): Promise<void> {
+    if (update.update_type !== 'invoice_paid') return;
+
+    const invoice = update.payload;
+    if (!invoice) return;
+
+    let payment: Payment | null = null;
+    if (invoice.payload) {
+      payment = await Payment.findByPk(invoice.payload);
+    }
+    if (!payment) {
+      payment = await Payment.findOne({
+        where: { externalPaymentId: String(invoice.invoice_id) },
+      });
+    }
+    if (!payment) {
+      console.warn(
+        `CryptoBot webhook: payment not found (invoice_id=${invoice.invoice_id} payload=${invoice.payload})`,
+      );
+      return;
+    }
+
+    if (invoice.status !== 'paid') return;
+    if (payment.status !== 'pending' && payment.status !== 'expired') return;
+
+    // CryptoBot quotes fees in the paid asset. We keep our pre-charge fiat
+    // total and percent and only stash the fee+asset+paid amount for analytics.
+    const updateData: Record<string, any> = {
+      status: 'paid',
+      paidAt: invoice.paid_at ? new Date(invoice.paid_at) : new Date(),
+      externalPaymentId: String(invoice.invoice_id),
+      meta: {
+        ...payment.meta,
+        cryptobot: {
+          ...(payment.meta.cryptobot || {}),
+          invoiceId: invoice.invoice_id,
+          hash: invoice.hash,
+          paidAsset: invoice.paid_asset,
+          paidAmount: invoice.paid_amount,
+          paidFiatRate: invoice.paid_fiat_rate,
+          feeAsset: invoice.fee_asset,
+          feeAmount: invoice.fee_amount,
+          paidAnonymously: invoice.paid_anonymously,
+          comment: invoice.comment,
+        },
+      },
+    };
+
+    await payment.update(updateData);
+    await this.deliveryService.attemptDelivery(payment.id);
+    paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+
+    console.log(
+      `CryptoBot: payment ${payment.id} succeeded (invoice: ${invoice.invoice_id}, asset: ${invoice.paid_asset})`,
+    );
   }
 
   async handleWataWebhook(payload: WataWebhookPayload): Promise<void> {

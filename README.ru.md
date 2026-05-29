@@ -25,7 +25,7 @@ FreshDonate — самохостимая система приёма донат�
 Бекенд — единый источник правды по товарам, платежам и клиентам. Он:
 
 - отдаёт REST API, который используют магазин и админка;
-- создаёт платежи во внешних шлюзах (YooKassa, Heleket) и обрабатывает их вебхуки;
+- создаёт платежи во внешних шлюзах (YooKassa, Heleket, Wata, Tebex, CryptoBot) и обрабатывает их вебхуки;
 - хранит отложенные доставки и передаёт их плагину при заходе игрока;
 - умеет доставлять покупки через RCON, если плагин не установлен;
 - выдаёт JWT для админки и ограничивает публичные ручки через rate‑limit.
@@ -94,7 +94,7 @@ docker compose up -d --build
 src/
   config/      env и инициализация sequelize
   core/        базовые repository/service/controller, общие ошибки
-  gateways/    HTTP‑клиенты для YooKassa, Heleket
+  gateways/    HTTP‑клиенты для YooKassa, Heleket, Wata, Tebex, CryptoBot
   models/      модели Sequelize
   plugins/     плагины Fastify (jwt, cors, redis, rate-limit, error-handler)
   routes/      auth, products, payments, customers, stats, webhooks, plugin
