@@ -55,7 +55,7 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         playerNickname: variables.player,
         productName: payment.productName,
         commands,
-        requireOnline: true,
+        requireOnline: !product.forceDelivery,
       });
     }
 

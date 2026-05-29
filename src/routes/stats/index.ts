@@ -19,9 +19,18 @@ const statsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return paymentService.getRevenueChart({
       from,
       to,
-      period: (period as 'daily' | 'weekly' | 'monthly') || 'daily',
+      period: (period as 'hourly' | 'daily' | 'weekly' | 'monthly') || 'daily',
       currency,
     });
+  });
+
+  fastify.get<{
+    Querystring: { from: string; to: string; currency?: string };
+  }>('/summary', {
+    onRequest: [fastify.authenticate],
+  }, async (request) => {
+    const { from, to, currency } = request.query;
+    return paymentService.getSummary({ from, to, currency });
   });
 };
 

@@ -23,11 +23,12 @@ interface ProductAttributes {
   commands: string[];
   imageUrl: string;
   allowCustomCount: boolean;
+  forceDelivery: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
-type ProductCreationAttributes = Optional<ProductAttributes, 'id' | 'description' | 'commands' | 'imageUrl' | 'allowCustomCount' | 'createdAt' | 'updatedAt'>;
+type ProductCreationAttributes = Optional<ProductAttributes, 'id' | 'description' | 'commands' | 'imageUrl' | 'allowCustomCount' | 'forceDelivery' | 'createdAt' | 'updatedAt'>;
 
 @Table({ tableName: 'products' })
 export class Product extends BaseModel<ProductAttributes, ProductCreationAttributes> {
@@ -63,6 +64,10 @@ export class Product extends BaseModel<ProductAttributes, ProductCreationAttribu
   @Default(false)
   @Column(DataType.BOOLEAN)
   declare allowCustomCount: boolean;
+
+  @Default(false)
+  @Column(DataType.BOOLEAN)
+  declare forceDelivery: boolean;
 
   @BelongsToMany(() => Promotion, () => PromotionProduct)
   declare promotions: Promotion[];

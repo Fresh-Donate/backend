@@ -13,6 +13,8 @@ const productBodySchema = {
     type: { type: 'string' as const, minLength: 1, maxLength: 32 },
     commands: { type: 'array' as const, items: { type: 'string' as const } },
     imageUrl: { type: 'string' as const, maxLength: 512 },
+    allowCustomCount: { type: 'boolean' as const },
+    forceDelivery: { type: 'boolean' as const },
   },
 };
 

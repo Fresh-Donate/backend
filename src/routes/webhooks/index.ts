@@ -4,7 +4,9 @@ import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
 import { TebexGateway } from '@/gateways/tebex.gateway';
+import { CryptoBotGateway } from '@/gateways/cryptobot.gateway';
 import { PaymentProvider } from '@/models/payment-provider.model';
+import type { CryptoBotWebhookUpdate } from '@/types';
 
 const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const paymentService = new PaymentService();
@@ -119,6 +121,55 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       await paymentService.handleHeleketWebhook(payload);
     } catch (error: any) {
       request.log.error(`Heleket webhook processing error: ${error.message}`);
+    }
+
+    return reply.code(200).send({ status: 'ok' });
+  });
+
+  // CryptoBot (Crypto Pay) signs the raw body with HMAC-SHA256 using
+  // SHA256(apiToken) as the key. Signature is in `crypto-pay-api-signature`.
+  // No fixed IP list — signature is the only authenticity check.
+  fastify.post<{ Body: Record<string, any> }>('/cryptobot', {
+    config: { rateLimit: { max: 200, timeWindow: 60000 } },
+  }, async (request, reply) => {
+    const provider = await PaymentProvider.findOne({ where: { providerId: 'cryptobot' } });
+    if (!provider) {
+      request.log.error('CryptoBot webhook: provider not found in database');
+      return reply.code(200).send({ status: 'ok' });
+    }
+
+    const { apiToken } = provider.credentials;
+    const rawBody: Buffer | undefined = (request as any).rawBody;
+    const signature = request.headers['crypto-pay-api-signature'] as string | undefined;
+
+    const skipSig = process.env.NODE_ENV === 'development'
+      || process.env.CRYPTOBOT_SKIP_SIGNATURE_CHECK === 'true';
+
+    if (!skipSig) {
+      if (!apiToken) {
+        request.log.warn('CryptoBot webhook rejected: apiToken not configured, cannot verify signature');
+        return reply.code(403).send({ error: 'Not configured' });
+      }
+      if (!rawBody) {
+        request.log.warn('CryptoBot webhook rejected: raw body unavailable');
+        return reply.code(400).send({ error: 'Bad request' });
+      }
+      const gateway = new CryptoBotGateway(apiToken, provider.testMode);
+      if (!gateway.verifyWebhookSignature(rawBody, signature)) {
+        request.log.warn('CryptoBot webhook rejected: invalid signature');
+        return reply.code(403).send({ error: 'Invalid signature' });
+      }
+    }
+
+    const update = request.body as CryptoBotWebhookUpdate;
+    request.log.info(
+      `CryptoBot webhook: type=${update?.update_type} invoice=${update?.payload?.invoice_id} status=${update?.payload?.status}`,
+    );
+
+    try {
+      await paymentService.handleCryptoBotWebhook(update);
+    } catch (error: any) {
+      request.log.error(`CryptoBot webhook processing error: ${error.message}`);
     }
 
     return reply.code(200).send({ status: 'ok' });

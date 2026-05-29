@@ -35,6 +35,16 @@ const DEFAULT_PROVIDERS: ProviderDefinition[] = [
     supportedCurrencies: ['USD'],
   },
   {
+    providerId: 'cryptobot',
+    name: 'CryptoBot',
+    description: 'Криптоплатежи через Telegram @CryptoBot: USDT, TON, BTC, ETH и другие. Покупатель оплачивает в крипте, вы выставляете счёт в фиате.',
+    icon: 'i-lucide-bot',
+    credentials: { apiToken: '' },
+    providerConfig: {},
+    commissionPercent: 3,
+    supportedCurrencies: ['USD'],
+  },
+  {
     providerId: 'wata',
     name: 'Wata',
     description: 'Приём платежей: банковские карты, СБП. Поддерживает песочницу.',

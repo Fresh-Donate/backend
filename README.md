@@ -25,7 +25,7 @@ The platform is split into four repositories:
 The backend is the single source of truth for products, payments and customers. It:
 
 - serves the REST API consumed by the shop and the admin panel;
-- creates payments in external gateways (YooKassa, Heleket) and handles their webhooks;
+- creates payments in external gateways (YooKassa, Heleket, Wata, Tebex, CryptoBot) and handles their webhooks;
 - stores pending deliveries and hands them to the in‑game plugin when a player logs in;
 - runs an RCON fallback for servers without the plugin installed;
 - issues JWT tokens for the admin panel and rate‑limits public endpoints.
@@ -94,7 +94,7 @@ All configuration is read from environment variables (see `src/config/index.ts`)
 src/
   config/      env + sequelize bootstrap
   core/        base repository / service / controller, shared errors
-  gateways/    YooKassa, Heleket HTTP clients
+  gateways/    YooKassa, Heleket, Wata, Tebex, CryptoBot HTTP clients
   models/      Sequelize models
   plugins/     Fastify plugins (jwt, cors, redis, rate-limit, error-handler)
   routes/      auth, products, payments, customers, stats, webhooks, plugin

@@ -20,6 +20,7 @@ import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
 import { TebexGateway } from '@/gateways/tebex.gateway';
+import { CryptoBotGateway } from '@/gateways/cryptobot.gateway';
 import { config } from '@/config';
 import { buildAmountInTargetSql, convert, toBaseCurrency, isSupportedCurrency } from '@/utils/currency';
 import type {
@@ -28,6 +29,9 @@ import type {
   UpgradeEvaluation,
   WataWebhookPayload,
   TebexWebhookEnvelope,
+  CryptoBotWebhookUpdate,
+  CryptoBotFiat,
+  StatsSummary,
 } from '@/types';
 
 function toDto(p: Payment): PaymentDto {
@@ -133,7 +137,7 @@ export class PaymentService {
       }
     }
 
-    // Pricing order: promo → upgrade «доплата» → multiply by count. Same
+    // Pricing order: promo → upgrade "доплата" → multiply by count. Same
     // evaluator as /preview, so what the modal showed is what we charge.
     const upgradeEval = await this.upgradePricingService.evaluate(data.nickname, product.id);
     if (upgradeEval.blocked) {
@@ -343,6 +347,46 @@ export class PaymentService {
           wata: { testMode: provider.testMode },
         },
       });
+    } else if (provider.providerId === 'cryptobot') {
+      const { apiToken } = provider.credentials;
+      if (!apiToken) {
+        throw new PaymentError(
+          'CryptoBot credentials not configured. Set apiToken in payment provider settings.',
+          'CRYPTOBOT_NOT_CONFIGURED',
+        );
+      }
+
+      const gateway = new CryptoBotGateway(apiToken, provider.testMode);
+      const returnUrl = config.payment.returnUrl;
+
+      const invoice = await gateway.createInvoice({
+        currencyType: 'fiat',
+        fiat: payment.currency as CryptoBotFiat,
+        amount: Number(payment.totalAmount),
+        description: `${productName} — FreshDonate`,
+        payload: payment.id,
+        paidBtnName: 'callback',
+        paidBtnUrl: `${returnUrl}?paymentId=${payment.id}`,
+        expiresIn: 3600,
+      });
+
+      const payUrl = CryptoBotGateway.pickPayUrl(invoice);
+      if (!payUrl) {
+        throw new PaymentError(
+          'CryptoBot did not return a pay URL',
+          'CRYPTOBOT_CREATE_ERROR',
+        );
+      }
+
+      await payment.update({
+        providerId: provider.providerId,
+        externalPaymentId: String(invoice.invoice_id),
+        externalPaymentUrl: payUrl,
+        meta: {
+          ...payment.meta,
+          cryptobot: { testMode: provider.testMode, hash: invoice.hash },
+        },
+      });
     } else if (provider.providerId === 'tebex') {
       const { webstoreToken, privateKey } = provider.credentials;
       if (!webstoreToken || !privateKey) {
@@ -513,6 +557,63 @@ export class PaymentService {
     }
   }
 
+  async handleCryptoBotWebhook(update: CryptoBotWebhookUpdate): Promise<void> {
+    if (update.update_type !== 'invoice_paid') return;
+
+    const invoice = update.payload;
+    if (!invoice) return;
+
+    let payment: Payment | null = null;
+    if (invoice.payload) {
+      payment = await Payment.findByPk(invoice.payload);
+    }
+    if (!payment) {
+      payment = await Payment.findOne({
+        where: { externalPaymentId: String(invoice.invoice_id) },
+      });
+    }
+    if (!payment) {
+      console.warn(
+        `CryptoBot webhook: payment not found (invoice_id=${invoice.invoice_id} payload=${invoice.payload})`,
+      );
+      return;
+    }
+
+    if (invoice.status !== 'paid') return;
+    if (payment.status !== 'pending' && payment.status !== 'expired') return;
+
+    // CryptoBot quotes fees in the paid asset. We keep our pre-charge fiat
+    // total and percent and only stash the fee+asset+paid amount for analytics.
+    const updateData: Record<string, any> = {
+      status: 'paid',
+      paidAt: invoice.paid_at ? new Date(invoice.paid_at) : new Date(),
+      externalPaymentId: String(invoice.invoice_id),
+      meta: {
+        ...payment.meta,
+        cryptobot: {
+          ...(payment.meta.cryptobot || {}),
+          invoiceId: invoice.invoice_id,
+          hash: invoice.hash,
+          paidAsset: invoice.paid_asset,
+          paidAmount: invoice.paid_amount,
+          paidFiatRate: invoice.paid_fiat_rate,
+          feeAsset: invoice.fee_asset,
+          feeAmount: invoice.fee_amount,
+          paidAnonymously: invoice.paid_anonymously,
+          comment: invoice.comment,
+        },
+      },
+    };
+
+    await payment.update(updateData);
+    await this.deliveryService.attemptDelivery(payment.id);
+    paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+
+    console.log(
+      `CryptoBot: payment ${payment.id} succeeded (invoice: ${invoice.invoice_id}, asset: ${invoice.paid_asset})`,
+    );
+  }
+
   async handleWataWebhook(payload: WataWebhookPayload): Promise<void> {
     // Wata pre-payment notifications may arrive without a transactionStatus —
     // safe to ignore until the post-payment one lands.
@@ -626,7 +727,7 @@ export class PaymentService {
 
       const updateData: Record<string, any> = {
         status: 'paid',
-        paidAt: subject.settled_at ? new Date(subject.settled_at) : new Date(),
+        paidAt: new Date(),
         totalAmount: paidAmount,
         currency: subject.price_paid?.currency || subject.price?.currency || payment.currency,
         externalPaymentId: subject.transaction_id || payment.externalPaymentId,
@@ -803,14 +904,10 @@ export class PaymentService {
     };
   }
 
-  // Cross-currency revenue chart: each row's amount is converted in SQL to
-  // the target currency (via admin currency_rates), so the DB returns one
-  // comparable number per bucket. Falls back to base currency when the
-  // requested code is unsupported.
   async getRevenueChart(options: {
     from: string;
     to: string;
-    period: 'daily' | 'weekly' | 'monthly';
+    period: 'hourly' | 'daily' | 'weekly' | 'monthly';
     currency?: string;
   }): Promise<{ date: string; amount: number; count: number }[]> {
     const { from, to, period, currency } = options;
@@ -824,7 +921,9 @@ export class PaymentService {
       ? "date_trunc('month', paid_at)"
       : period === 'weekly'
         ? "date_trunc('week', paid_at)"
-        : "date_trunc('day', paid_at)";
+        : period === 'hourly'
+          ? "date_trunc('hour', paid_at)"
+          : "date_trunc('day', paid_at)";
 
     const amountInTarget = buildAmountInTargetSql(
       settings.currency_rates,
@@ -858,4 +957,203 @@ export class PaymentService {
       count: Number(r.count) || 0,
     }));
   }
+
+  async getSummary(options: {
+    from: string;
+    to: string;
+    currency?: string;
+  }): Promise<StatsSummary> {
+    const { from, to, currency } = options;
+
+    const settings = await this.settingsService.get();
+    const requested = currency?.toUpperCase();
+    const target =
+      requested && isSupportedCurrency(requested) ? requested : settings.base_currency;
+
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    const lengthMs = Math.max(0, toDate.getTime() - fromDate.getTime());
+    // Previous window ends just before current starts (1ms gap to avoid
+    // double-counting an edge payment) and has the same length.
+    const prevTo = new Date(fromDate.getTime() - 1);
+    const prevFrom = new Date(prevTo.getTime() - lengthMs);
+
+    const amountInTarget = buildAmountInTargetSql(
+      settings.currency_rates,
+      settings.base_currency,
+      target,
+      'total_amount',
+      'currency',
+    );
+    const commissionInTarget = buildAmountInTargetSql(
+      settings.currency_rates,
+      settings.base_currency,
+      target,
+      'commission_amount',
+      'currency',
+    );
+
+    const dailyTrunc = "date_trunc('day', paid_at)";
+    const paidStatuses = { [Op.in]: ['paid', 'delivered'] as PaymentStatus[] };
+    const currentWhere = {
+      status: paidStatuses,
+      paidAt: { [Op.gte]: fromDate, [Op.lte]: toDate },
+    };
+    const prevWhere = {
+      status: paidStatuses,
+      paidAt: { [Op.gte]: prevFrom, [Op.lte]: prevTo },
+    };
+
+    type DailyRow = { date: string; amount: string; commission: string; count: string; customers: string };
+    type AggRow = { amount: string; commission: string; count: string; customers: string } | null;
+    type ProviderRow = { providerId: string | null; amount: string; count: string };
+    type ProductRow = { productId: string; productName: string; amount: string; count: string };
+
+    const [dailyRows, currentAgg, prevAgg, providerRows, productRows] = (await Promise.all([
+      Payment.findAll({
+        attributes: [
+          [literal(dailyTrunc), 'date'],
+          [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COALESCE', fn('SUM', literal(commissionInTarget)), 0), 'commission'],
+          [fn('COUNT', col('id')), 'count'],
+          [literal('COUNT(DISTINCT customer_nickname)'), 'customers'],
+        ],
+        where: currentWhere,
+        group: [literal(dailyTrunc)] as any,
+        order: [[literal(dailyTrunc), 'ASC']] as any,
+        raw: true,
+      }),
+      Payment.findOne({
+        attributes: [
+          [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COALESCE', fn('SUM', literal(commissionInTarget)), 0), 'commission'],
+          [fn('COUNT', col('id')), 'count'],
+          [literal('COUNT(DISTINCT customer_nickname)'), 'customers'],
+        ],
+        where: currentWhere,
+        raw: true,
+      }),
+      Payment.findOne({
+        attributes: [
+          [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COALESCE', fn('SUM', literal(commissionInTarget)), 0), 'commission'],
+          [fn('COUNT', col('id')), 'count'],
+          [literal('COUNT(DISTINCT customer_nickname)'), 'customers'],
+        ],
+        where: prevWhere,
+        raw: true,
+      }),
+      Payment.findAll({
+        attributes: [
+          'providerId',
+          [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COUNT', col('id')), 'count'],
+        ],
+        where: currentWhere,
+        group: ['providerId'],
+        raw: true,
+      }),
+      Payment.findAll({
+        attributes: [
+          'productId',
+          'productName',
+          [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+          [fn('COUNT', col('id')), 'count'],
+        ],
+        where: currentWhere,
+        group: ['productId', 'productName'],
+        order: [[fn('SUM', literal(amountInTarget)), 'DESC']] as any,
+        limit: 10,
+        raw: true,
+      }),
+    ])) as unknown as [DailyRow[], AggRow, AggRow, ProviderRow[], ProductRow[]];
+
+    const amountByDay = new Map<string, number>();
+    const commissionByDay = new Map<string, number>();
+    const countByDay = new Map<string, number>();
+    const customersByDay = new Map<string, number>();
+    for (const row of dailyRows) {
+      const dayKey = new Date(row.date).toISOString().slice(0, 10);
+      amountByDay.set(dayKey, Number(row.amount) || 0);
+      commissionByDay.set(dayKey, Number(row.commission) || 0);
+      countByDay.set(dayKey, Number(row.count) || 0);
+      customersByDay.set(dayKey, Number(row.customers) || 0);
+    }
+
+    const days = eachDayUtc(fromDate, toDate);
+    const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+    const revenueSparkline = days.map((d) => round2(amountByDay.get(d) || 0));
+    const commissionSparkline = days.map((d) => round2(commissionByDay.get(d) || 0));
+    const countSparkline = days.map((d) => countByDay.get(d) || 0);
+    const customersSparkline = days.map((d) => customersByDay.get(d) || 0);
+    const avgSparkline = days.map((d) => {
+      const amt = amountByDay.get(d) || 0;
+      const cnt = countByDay.get(d) || 0;
+      return cnt > 0 ? round2(amt / cnt) : 0;
+    });
+
+    const curRevenue = Number(currentAgg?.amount) || 0;
+    const curCommission = Number(currentAgg?.commission) || 0;
+    const curCount = Number(currentAgg?.count) || 0;
+    const curCustomers = Number(currentAgg?.customers) || 0;
+    const curAvg = curCount > 0 ? curRevenue / curCount : 0;
+
+    const prevRevenue = Number(prevAgg?.amount) || 0;
+    const prevCommission = Number(prevAgg?.commission) || 0;
+    const prevCount = Number(prevAgg?.count) || 0;
+    const prevCustomers = Number(prevAgg?.customers) || 0;
+    const prevAvg = prevCount > 0 ? prevRevenue / prevCount : 0;
+
+    return {
+      currency: target,
+      revenue: {
+        current: round2(curRevenue),
+        previous: round2(prevRevenue),
+        sparkline: revenueSparkline,
+      },
+      commission: {
+        current: round2(curCommission),
+        previous: round2(prevCommission),
+        sparkline: commissionSparkline,
+      },
+      customers: {
+        current: curCustomers,
+        previous: prevCustomers,
+        sparkline: customersSparkline,
+      },
+      avgOrder: {
+        current: round2(curAvg),
+        previous: round2(prevAvg),
+        sparkline: avgSparkline,
+      },
+      payments: {
+        current: curCount,
+        previous: prevCount,
+        sparkline: countSparkline,
+      },
+      paymentProviders: providerRows.map((p) => ({
+        providerId: p.providerId,
+        count: Number(p.count) || 0,
+        amount: round2(Number(p.amount) || 0),
+      })),
+      topProducts: productRows.map((p) => ({
+        productId: p.productId,
+        productName: p.productName,
+        count: Number(p.count) || 0,
+        amount: round2(Number(p.amount) || 0),
+      })),
+    };
+  }
+}
+
+function eachDayUtc(from: Date, to: Date): string[] {
+  const days: string[] = [];
+  const cur = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+  const end = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()));
+  while (cur <= end) {
+    days.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return days;
 }
