@@ -1,5 +1,9 @@
 import crypto from 'crypto';
-import { Settings } from '@/models/settings.model';
+import {
+  Settings,
+  DEFAULT_SMTP_CONFIG,
+  DEFAULT_RECEIPT_TEMPLATE,
+} from '@/models/settings.model';
 import { PaymentProvider } from '@/models/payment-provider.model';
 import {
   SUPPORTED_CURRENCIES,
@@ -10,7 +14,7 @@ import {
   type CurrencyRates,
   type SupportedCurrency,
 } from '@/utils/currency';
-import type { SettingsDto } from '@/types';
+import type { SettingsDto, SmtpConfig, ReceiptTemplate } from '@/types';
 import { MIN_AMOUNT_LOWER, MIN_AMOUNT_UPPER } from '@/types/payment-provider';
 
 function generateToken(): string {
@@ -53,6 +57,52 @@ function fillRatesForBase(stored: CurrencyRates | null | undefined, base: Suppor
   return out;
 }
 
+function fillSmtpConfig(stored: Partial<SmtpConfig> | null | undefined): SmtpConfig {
+  const s = stored ?? {};
+  return {
+    enabled: typeof s.enabled === 'boolean' ? s.enabled : DEFAULT_SMTP_CONFIG.enabled,
+    host: typeof s.host === 'string' ? s.host : DEFAULT_SMTP_CONFIG.host,
+    port: Number.isFinite(Number(s.port)) ? Number(s.port) : DEFAULT_SMTP_CONFIG.port,
+    secure: typeof s.secure === 'boolean' ? s.secure : DEFAULT_SMTP_CONFIG.secure,
+    user: typeof s.user === 'string' ? s.user : DEFAULT_SMTP_CONFIG.user,
+    password: typeof s.password === 'string' ? s.password : DEFAULT_SMTP_CONFIG.password,
+    fromEmail: typeof s.fromEmail === 'string' ? s.fromEmail : DEFAULT_SMTP_CONFIG.fromEmail,
+    fromName: typeof s.fromName === 'string' ? s.fromName : DEFAULT_SMTP_CONFIG.fromName,
+  };
+}
+
+function fillReceiptTemplate(stored: Partial<ReceiptTemplate> | null | undefined): ReceiptTemplate {
+  const t = stored ?? {};
+  return {
+    subject: typeof t.subject === 'string' && t.subject.trim() ? t.subject : DEFAULT_RECEIPT_TEMPLATE.subject,
+    html: typeof t.html === 'string' && t.html.trim() ? t.html : DEFAULT_RECEIPT_TEMPLATE.html,
+  };
+}
+
+function normalizeSmtpPatch(patch: Partial<SmtpConfig> | undefined, current: SmtpConfig): SmtpConfig | undefined {
+  if (patch === undefined) return undefined;
+  const port = patch.port !== undefined ? Number(patch.port) : current.port;
+  const safePort = Number.isFinite(port) && port > 0 && port < 65536 ? Math.floor(port) : current.port;
+  return {
+    enabled: typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled,
+    host: typeof patch.host === 'string' ? patch.host.trim().slice(0, 256) : current.host,
+    port: safePort,
+    secure: typeof patch.secure === 'boolean' ? patch.secure : current.secure,
+    user: typeof patch.user === 'string' ? patch.user.slice(0, 256) : current.user,
+    password: typeof patch.password === 'string' ? patch.password.slice(0, 512) : current.password,
+    fromEmail: typeof patch.fromEmail === 'string' ? patch.fromEmail.trim().slice(0, 256) : current.fromEmail,
+    fromName: typeof patch.fromName === 'string' ? patch.fromName.trim().slice(0, 128) : current.fromName,
+  };
+}
+
+function normalizeReceiptPatch(patch: Partial<ReceiptTemplate> | undefined, current: ReceiptTemplate): ReceiptTemplate | undefined {
+  if (patch === undefined) return undefined;
+  return {
+    subject: typeof patch.subject === 'string' ? patch.subject.slice(0, 512) : current.subject,
+    html: typeof patch.html === 'string' ? patch.html.slice(0, 100000) : current.html,
+  };
+}
+
 function toDto(s: Settings): SettingsDto {
   const base: SupportedCurrency = isSupportedCurrency(s.base_currency)
     ? s.base_currency
@@ -66,6 +116,8 @@ function toDto(s: Settings): SettingsDto {
     currency_rates: fillRatesForBase(s.currency_rates, base),
     telemetry_enabled: s.telemetry_enabled ?? true,
     installation_id: s.installation_id,
+    smtp_config: fillSmtpConfig(s.smtp_config),
+    receipt_template: fillReceiptTemplate(s.receipt_template),
   };
 }
 
@@ -82,6 +134,8 @@ export class SettingsService {
         currency_rates: defaultRatesFor(DEFAULT_BASE_CURRENCY),
         telemetry_enabled: true,
         installation_id: generateInstallationId(),
+        smtp_config: DEFAULT_SMTP_CONFIG,
+        receipt_template: DEFAULT_RECEIPT_TEMPLATE,
       },
     });
 
@@ -104,6 +158,8 @@ export class SettingsService {
         currency_rates: defaultRatesFor(DEFAULT_BASE_CURRENCY),
         telemetry_enabled: true,
         installation_id: generateInstallationId(),
+        smtp_config: DEFAULT_SMTP_CONFIG,
+        receipt_template: DEFAULT_RECEIPT_TEMPLATE,
       },
     });
 
@@ -125,11 +181,22 @@ export class SettingsService {
     const patchRates = normalizeCurrencyRates(data.currency_rates, nextBase);
     const nextRates = patchRates ? { ...startingRates, ...patchRates } : startingRates;
 
+    const currentSmtp = fillSmtpConfig(settings.smtp_config);
+    const currentReceipt = fillReceiptTemplate(settings.receipt_template);
+    const nextSmtp = normalizeSmtpPatch(data.smtp_config, currentSmtp);
+    const nextReceipt = normalizeReceiptPatch(data.receipt_template, currentReceipt);
+
     const patch: Partial<SettingsDto> = {
       ...data,
       base_currency: nextBase,
       currency_rates: nextRates,
     };
+
+    if (nextSmtp) patch.smtp_config = nextSmtp;
+    else delete patch.smtp_config;
+
+    if (nextReceipt) patch.receipt_template = nextReceipt;
+    else delete patch.receipt_template;
 
     delete patch.installation_id;
 

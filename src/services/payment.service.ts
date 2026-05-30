@@ -7,6 +7,7 @@ import { PaymentProvider } from '@/models/payment-provider.model';
 import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
 import { DeliveryService } from './delivery.service';
+import { EmailService } from './email.service';
 import { PaymentExpirationService } from './payment-expiration.service';
 import { UpgradePricingService } from './upgrade-pricing.service';
 import {
@@ -76,8 +77,17 @@ export class PaymentService {
   private customerService = new CustomerService();
   private settingsService = new SettingsService();
   private deliveryService = new DeliveryService();
+  private emailService = new EmailService();
   private expirationService = new PaymentExpirationService();
   private upgradePricingService = new UpgradePricingService();
+
+  // Single fan-out point for "payment just transitioned to paid": fire the
+  // receipt email (best-effort, never blocks) and then kick off delivery.
+  // Webhooks and demo-mode all go through here so behaviour stays uniform.
+  private async onPaymentPaid(paymentId: string): Promise<void> {
+    void this.emailService.sendPurchaseConfirmation(paymentId).catch(() => {});
+    await this.deliveryService.attemptDelivery(paymentId);
+  }
 
   async previewPrice(nickname: string, productId: string): Promise<UpgradeEvaluation> {
     return this.upgradePricingService.evaluate(nickname, productId);
@@ -233,7 +243,7 @@ export class PaymentService {
         meta: { demo: true },
       });
 
-      await this.deliveryService.attemptDelivery(payment.id);
+      await this.onPaymentPaid(payment.id);
 
       const result = await Payment.findByPk(payment.id);
       if (!result) throw new Error('Payment vanished after creation');
@@ -453,7 +463,7 @@ export class PaymentService {
       }
 
       await payment.update(updateData);
-      await this.deliveryService.attemptDelivery(payment.id);
+      await this.onPaymentPaid(payment.id);
       paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
       console.log(`YooKassa: payment ${payment.id} succeeded (external: ${externalId})`);
@@ -533,7 +543,7 @@ export class PaymentService {
       };
 
       await payment.update(updateData);
-      await this.deliveryService.attemptDelivery(payment.id);
+      await this.onPaymentPaid(payment.id);
       paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
       console.log(`Heleket: payment ${payment.id} succeeded (uuid: ${payload.uuid}, txid: ${payload.txid})`);
@@ -606,7 +616,7 @@ export class PaymentService {
     };
 
     await payment.update(updateData);
-    await this.deliveryService.attemptDelivery(payment.id);
+    await this.onPaymentPaid(payment.id);
     paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
     console.log(
@@ -664,7 +674,7 @@ export class PaymentService {
         },
       });
 
-      await this.deliveryService.attemptDelivery(payment.id);
+      await this.onPaymentPaid(payment.id);
       paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
       console.log(`Wata: payment ${payment.id} succeeded (tx: ${payload.transactionId})`);
@@ -751,7 +761,7 @@ export class PaymentService {
       };
 
       await payment.update(updateData);
-      await this.deliveryService.attemptDelivery(payment.id);
+      await this.onPaymentPaid(payment.id);
       paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
 
       console.log(`Tebex: payment ${payment.id} completed (tx: ${subject.transaction_id})`);
@@ -802,7 +812,7 @@ export class PaymentService {
       paidAt: new Date(),
     });
 
-    await this.deliveryService.attemptDelivery(payment.id);
+    await this.onPaymentPaid(payment.id);
     await payment.reload();
 
     paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));

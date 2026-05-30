@@ -1,9 +1,12 @@
 import { type FastifyPluginAsync } from 'fastify';
 import { SettingsService } from '@/services/settings.service';
-import type { SettingsDto } from '@/types';
+import { EmailService, RECEIPT_PLACEHOLDERS } from '@/services/email.service';
+import { ValidationError } from '@/core';
+import type { SettingsDto, ReceiptTemplate } from '@/types';
 
 const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new SettingsService();
+  const emailService = new EmailService();
 
   fastify.get('/', { onRequest: [fastify.authenticate] }, async () => {
     return service.get();
@@ -18,6 +21,17 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       base_currency?: 'RUB' | 'USD' | 'EUR';
       currency_rates?: Record<string, number>;
       telemetry_enabled?: boolean;
+      smtp_config?: {
+        enabled?: boolean;
+        host?: string;
+        port?: number;
+        secure?: boolean;
+        user?: string;
+        password?: string;
+        fromEmail?: string;
+        fromName?: string;
+      };
+      receipt_template?: { subject?: string; html?: string };
     };
   }>('/', {
     onRequest: [fastify.authenticate],
@@ -47,6 +61,26 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
             additionalProperties: { type: 'number' as const, minimum: 0, maximum: 100000 },
           },
           telemetry_enabled: { type: 'boolean' as const },
+          smtp_config: {
+            type: 'object' as const,
+            properties: {
+              enabled: { type: 'boolean' as const },
+              host: { type: 'string' as const, maxLength: 256 },
+              port: { type: 'integer' as const, minimum: 1, maximum: 65535 },
+              secure: { type: 'boolean' as const },
+              user: { type: 'string' as const, maxLength: 256 },
+              password: { type: 'string' as const, maxLength: 512 },
+              fromEmail: { type: 'string' as const, maxLength: 256 },
+              fromName: { type: 'string' as const, maxLength: 128 },
+            },
+          },
+          receipt_template: {
+            type: 'object' as const,
+            properties: {
+              subject: { type: 'string' as const, maxLength: 512 },
+              html: { type: 'string' as const, maxLength: 100000 },
+            },
+          },
         },
       },
     },
@@ -59,6 +93,63 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     }
 
     return after;
+  });
+
+  fastify.get('/receipt/placeholders', { onRequest: [fastify.authenticate] }, async () => {
+    return { placeholders: RECEIPT_PLACEHOLDERS };
+  });
+
+  fastify.post<{
+    Body: {
+      template?: { subject?: string; html?: string };
+    };
+  }>('/receipt/preview', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object' as const,
+        properties: {
+          template: {
+            type: 'object' as const,
+            properties: {
+              subject: { type: 'string' as const, maxLength: 512 },
+              html: { type: 'string' as const, maxLength: 100000 },
+            },
+          },
+        },
+      },
+    },
+  }, async (request) => {
+    const settings = await service.get();
+    const template: ReceiptTemplate = {
+      subject: request.body.template?.subject ?? settings.receipt_template.subject,
+      html: request.body.template?.html ?? settings.receipt_template.html,
+    };
+    return emailService.renderPreview(template);
+  });
+
+  fastify.post<{ Body: { to: string } }>('/smtp/test', {
+    onRequest: [fastify.authenticate],
+    schema: {
+      body: {
+        type: 'object' as const,
+        required: ['to'],
+        properties: {
+          to: { type: 'string' as const, format: 'email', maxLength: 256 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      await emailService.sendTestEmail(request.body.to);
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return reply.code(400).send({ error: err.message });
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(502).send({ error: `SMTP error: ${message}` });
+    }
   });
 };
 

@@ -23,7 +23,6 @@ export class DeliveryService {
   async attemptDelivery(paymentId: string): Promise<void> {
     const settings = await this.settingsService.get();
 
-    // Plugin delivery: skip RCON, plugin polls /plugin/pending and picks it up.
     if (settings.delivery_method === 'plugin') {
       return;
     }
@@ -44,7 +43,6 @@ export class DeliveryService {
       return;
     }
 
-    // Deep copy to avoid Sequelize JSONB mutation detection issues.
     const logs: DeliveryLog[] = [...(payment.meta?.deliveryLogs || [])];
     const attempt = logs.length + 1;
 
