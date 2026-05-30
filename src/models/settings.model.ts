@@ -64,7 +64,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplate = {
 <body style="margin:0;padding:24px;background:#f5f6f8;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a1a;">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e6e8eb;">
     <tr>
-      <td style="padding:24px 28px;background:#0f172a;color:#ffffff;">
+      <td style="padding:24px 28px;background:#0096d5;color:#ffffff;">
         <div style="font-size:13px;opacity:0.7;text-transform:uppercase;letter-spacing:0.06em;">{shopName}</div>
         <div style="font-size:22px;font-weight:700;margin-top:6px;">Спасибо за покупку!</div>
       </td>
