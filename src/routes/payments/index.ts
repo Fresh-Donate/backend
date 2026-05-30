@@ -1,11 +1,14 @@
 import { type FastifyPluginAsync } from 'fastify';
 import { PaymentService } from '@/services/payment.service';
 import { DeliveryService } from '@/services/delivery.service';
+import { EmailService } from '@/services/email.service';
+import { ValidationError } from '@/core';
 import type { PaymentStatus } from '@/models/payment.model';
 
 const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentService();
   const deliveryService = new DeliveryService();
+  const emailService = new EmailService();
 
   fastify.post<{
     Body: {
@@ -22,8 +25,7 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         required: ['productId', 'nickname', 'email', 'paymentOptionId'],
         properties: {
           productId: { type: 'string' as const },
-          // Minecraft Java Edition username rules — 3..16 chars of [a-zA-Z0-9_].
-          // Mirrored in shop UI Zod schema; keep the two in sync.
+          // Minecraft Java Edition username rules
           nickname: {
             type: 'string' as const,
             minLength: 3,
@@ -112,6 +114,24 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     const payment = await service.findById(request.params.id);
     if (!payment) return reply.code(404).send({ error: 'Payment not found' });
     return payment;
+  });
+
+  fastify.post<{ Params: { id: string } }>('/:id/resend-receipt', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    try {
+      const result = await emailService.resendPurchaseConfirmation(request.params.id);
+      if (!result.sent) {
+        return reply.code(400).send({ error: result.reason || 'send_failed' });
+      }
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return reply.code(400).send({ error: err.message });
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(502).send({ error: message });
+    }
   });
 };
 
