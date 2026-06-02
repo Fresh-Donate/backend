@@ -11,6 +11,8 @@ import { Promotion } from './promotion.model';
 import { PromotionProduct } from './promotion-product.model';
 import { Group } from './group.model';
 import { GroupProduct } from './group-product.model';
+import { Server } from './server.model';
+import { ProductServer } from './product-server.model';
 
 interface ProductAttributes {
   id: string;
@@ -74,4 +76,7 @@ export class Product extends BaseModel<ProductAttributes, ProductCreationAttribu
 
   @BelongsToMany(() => Group, () => GroupProduct)
   declare groups: Group[];
+
+  @BelongsToMany(() => Server, () => ProductServer)
+  declare servers: Server[];
 }

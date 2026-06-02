@@ -4,6 +4,10 @@ import { EmailService, RECEIPT_PLACEHOLDERS } from '@/services/email.service';
 import { ValidationError } from '@/core';
 import type { SettingsDto, ReceiptTemplate } from '@/types';
 
+function isValidationError(err: unknown): err is ValidationError {
+  return err instanceof ValidationError;
+}
+
 const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new SettingsService();
   const emailService = new EmailService();
@@ -18,6 +22,7 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       delivery_method?: string;
       rcon_config?: { host?: string; port?: number; password?: string };
       plugin_config?: { token?: string };
+      multi_server_enabled?: boolean;
       base_currency?: 'RUB' | 'USD' | 'EUR';
       currency_rates?: Record<string, number>;
       telemetry_enabled?: boolean;
@@ -55,6 +60,7 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
               token: { type: 'string' as const, maxLength: 64 },
             },
           },
+          multi_server_enabled: { type: 'boolean' as const },
           base_currency: { type: 'string' as const, enum: ['RUB', 'USD', 'EUR'] },
           currency_rates: {
             type: 'object' as const,
@@ -84,15 +90,22 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         },
       },
     },
-  }, async (request) => {
+  }, async (request, reply) => {
     const before = await service.get();
-    const after = await service.update(request.body as Partial<SettingsDto>);
+    try {
+      const after = await service.update(request.body as Partial<SettingsDto>);
 
-    if (before.telemetry_enabled !== after.telemetry_enabled) {
-      await fastify.telemetry?.onToggle(after.telemetry_enabled);
+      if (before.telemetry_enabled !== after.telemetry_enabled) {
+        await fastify.telemetry?.onToggle(after.telemetry_enabled);
+      }
+
+      return after;
+    } catch (err) {
+      if (isValidationError(err)) {
+        return reply.code(400).send({ error: err.message });
+      }
+      throw err;
     }
-
-    return after;
   });
 
   fastify.get('/receipt/placeholders', { onRequest: [fastify.authenticate] }, async () => {

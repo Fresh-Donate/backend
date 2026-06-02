@@ -1,4 +1,4 @@
-import { Sequelize, QueryTypes } from 'sequelize';
+import { type Sequelize, QueryTypes } from 'sequelize';
 import { Sequelize as SequelizeTS } from 'sequelize-typescript';
 import { config } from './index';
 
@@ -15,8 +15,11 @@ import { Promotion } from '@/models/promotion.model';
 import { PromotionProduct } from '@/models/promotion-product.model';
 import { Group } from '@/models/group.model';
 import { GroupProduct } from '@/models/group-product.model';
+import { Server } from '@/models/server.model';
+import { ProductServer } from '@/models/product-server.model';
+import { PaymentDelivery } from '@/models/payment-delivery.model';
 
-const models: any[] = [ShopSettings, Product, Settings, PaymentProvider, PaymentOption, Payment, Promotion, PromotionProduct, Group, GroupProduct];
+const models: any[] = [ShopSettings, Product, Settings, PaymentProvider, PaymentOption, Payment, Promotion, PromotionProduct, Group, GroupProduct, Server, ProductServer, PaymentDelivery];
 
 export const sequelize = new SequelizeTS({
   dialect: 'postgres',
@@ -39,10 +42,6 @@ export const sequelize = new SequelizeTS({
   },
 });
 
-// One-shot migration: when the legacy `customers` table is still present,
-// copy nickname/email into the new snapshot columns on `payments`, drop the
-// FK, and remove the table. Idempotent — does nothing once `customers` is
-// gone. Runs before sync() so sync doesn't trip on the legacy FK column.
 async function migrateCustomersToSnapshot(db: Sequelize): Promise<void> {
   const [row] = await db.query<{ regclass: string | null }>(
     `SELECT to_regclass('public.customers')::text AS regclass`,
@@ -67,8 +66,6 @@ async function migrateCustomersToSnapshot(db: Sequelize): Promise<void> {
        AND (p.customer_nickname IS NULL OR p.customer_nickname = '');
   `);
 
-  // Orphaned payments (customer row already gone) — fill with placeholder so
-  // NOT NULL constraint can be applied. Real value can't be recovered.
   await db.query(`
     UPDATE payments
        SET customer_nickname = COALESCE(customer_nickname, ''),
@@ -93,7 +90,6 @@ export async function initDatabase(): Promise<void> {
 
     await migrateCustomersToSnapshot(sequelize as unknown as Sequelize);
 
-    // sync в фоне — не блокирует старт сервера
     sequelize.sync({ alter: true }).then(() => {
       console.log('Database synced.');
     }).catch((err) => {

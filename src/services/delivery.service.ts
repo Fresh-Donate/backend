@@ -1,5 +1,7 @@
 import { Payment } from '@/models/payment.model';
 import { Product } from '@/models/product.model';
+import { Server } from '@/models/server.model';
+import { PaymentDelivery } from '@/models/payment-delivery.model';
 import { RconService } from './rcon.service';
 import { SettingsService } from './settings.service';
 import { buildCommandVariables } from '@/utils/command-variables';
@@ -24,6 +26,9 @@ export class DeliveryService {
     const settings = await this.settingsService.get();
 
     if (settings.delivery_method === 'plugin') {
+      if (settings.multi_server_enabled) {
+        await this.fanOutToServers(paymentId);
+      }
       return;
     }
 
@@ -91,6 +96,39 @@ export class DeliveryService {
     }
   }
 
+  private async fanOutToServers(paymentId: string): Promise<void> {
+    const payment = await Payment.findByPk(paymentId);
+    if (!payment) return;
+    if (payment.status !== 'paid') return;
+
+    const product = await Product.findByPk(payment.productId, {
+      include: [{ model: Server, through: { attributes: [] }, required: false }],
+    });
+    if (!product) return;
+
+    const serverIds = (product.servers || []).map((s) => s.id);
+
+    if (serverIds.length === 0) {
+      await payment.update({
+        status: 'failed',
+        meta: {
+          ...payment.meta,
+          deliveryFailure: 'no_servers_bound_at_payment_time',
+        },
+      });
+      payment.changed('meta', true);
+      await payment.save();
+      return;
+    }
+
+    for (const serverId of serverIds) {
+      await PaymentDelivery.findOrCreate({
+        where: { paymentId, serverId },
+        defaults: { paymentId, serverId },
+      });
+    }
+  }
+
   private scheduleRetryOrFail(
     paymentId: string,
     currentAttempt: number,
@@ -134,6 +172,14 @@ export class DeliveryService {
       });
       payment.changed('meta', true);
       await payment.save();
+    }
+
+    const settings = await this.settingsService.get();
+    if (settings.delivery_method === 'plugin' && settings.multi_server_enabled) {
+      await PaymentDelivery.update(
+        { status: 'pending', deliveredAt: null },
+        { where: { paymentId } },
+      );
     }
 
     await this.attemptDelivery(paymentId);

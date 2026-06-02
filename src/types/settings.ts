@@ -28,6 +28,7 @@ export interface SettingsDto {
   plugin_config: {
     token: string;
   };
+  multi_server_enabled: boolean;
   base_currency: SupportedCurrency;
   currency_rates: CurrencyRates;
   telemetry_enabled: boolean;

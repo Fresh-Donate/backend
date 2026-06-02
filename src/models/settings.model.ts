@@ -27,6 +27,7 @@ interface SettingsAttributes {
   delivery_method: DeliveryMethod;
   rcon_config: RconConfig;
   plugin_config: PluginConfig;
+  multi_server_enabled: boolean;
   base_currency: SupportedCurrency;
   currency_rates: CurrencyRates;
   telemetry_enabled: boolean;
@@ -39,7 +40,7 @@ interface SettingsAttributes {
 
 type SettingsCreationAttributes = Optional<
   SettingsAttributes,
-  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'base_currency' | 'currency_rates' | 'telemetry_enabled' | 'installation_id' | 'smtp_config' | 'receipt_template' | 'createdAt' | 'updatedAt'
+  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'multi_server_enabled' | 'base_currency' | 'currency_rates' | 'telemetry_enabled' | 'installation_id' | 'smtp_config' | 'receipt_template' | 'createdAt' | 'updatedAt'
 >;
 
 export const DEFAULT_SMTP_CONFIG: SmtpConfig = {
@@ -142,6 +143,10 @@ export class Settings extends BaseModel<SettingsAttributes, SettingsCreationAttr
   @Default({ token: '' })
   @Column(DataType.JSONB)
   declare plugin_config: PluginConfig;
+
+  @Default(false)
+  @Column(DataType.BOOLEAN)
+  declare multi_server_enabled: boolean;
 
   @Default('RUB')
   @Column(DataType.STRING(8))
