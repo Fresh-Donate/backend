@@ -5,7 +5,8 @@ import type { OwnerType } from '@/models/shop-settings.model';
 const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new ShopSettingsService();
 
-  fastify.get('/', async () => {
+  fastify.get('/', async (_req, reply) => {
+    reply.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
     return service.get();
   });
 

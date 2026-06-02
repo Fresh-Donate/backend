@@ -21,7 +21,8 @@ const productBodySchema = {
 const productRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new ProductService();
 
-  fastify.get('/', async () => {
+  fastify.get('/', async (_req, reply) => {
+    reply.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
     return service.findAll();
   });
 

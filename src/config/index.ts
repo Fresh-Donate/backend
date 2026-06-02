@@ -35,7 +35,12 @@ export const config = {
   rateLimit: {
     max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
     timeWindow: parseInt(process.env.RATE_LIMIT_TIMEWINDOW || '60000', 10),
+    cache: parseInt(process.env.RATE_LIMIT_CACHE || '50000', 10),
   },
+
+  trustedProxies: (process.env.TRUSTED_PROXIES
+    || '127.0.0.1/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7,169.254.0.0/16,fe80::/10'
+  ).split(',').map((s) => s.trim()).filter(Boolean),
 
   payment: {
     returnUrl: process.env.PAYMENT_RETURN_URL || 'http://localhost:3002/payment/success',
