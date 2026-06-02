@@ -10,6 +10,14 @@ import { buildCommandVariables, resolveCommandVariables } from '@/utils/command-
 const settingsService = new SettingsService();
 const serverService = new ServerService();
 
+// Auth flow:
+//   1. X-Api-Key is ALWAYS the global settings.plugin_config.token. It
+//      authenticates the plugin regardless of mode — like before.
+//   2. multi_server_enabled=true: X-Server-Id additionally tells the backend
+//      which server this plugin represents. Used for routing PaymentDelivery
+//      rows. The id alone is NOT a credential; without a valid api key it
+//      grants nothing.
+//   3. multi_server_enabled=false (legacy): X-Server-Id is ignored.
 async function authenticatePlugin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const apiKey = request.headers['x-api-key'];
   if (typeof apiKey !== 'string' || !apiKey) {
@@ -18,17 +26,20 @@ async function authenticatePlugin(request: FastifyRequest, reply: FastifyReply):
 
   const settings = await settingsService.get();
 
-  if (settings.multi_server_enabled) {
-    const server = await serverService.findByAuthKey(apiKey);
-    if (!server) {
-      return reply.code(403).send({ error: 'Invalid API key' });
-    }
-    (request as any).pluginServerId = server.id;
-    return;
-  }
-
   if (!settings.plugin_config.token || apiKey !== settings.plugin_config.token) {
     return reply.code(403).send({ error: 'Invalid API key' });
+  }
+
+  if (settings.multi_server_enabled) {
+    const serverIdHeader = request.headers['x-server-id'];
+    if (typeof serverIdHeader !== 'string' || !serverIdHeader) {
+      return reply.code(400).send({ error: 'Missing X-Server-Id header (multi-server mode is on)' });
+    }
+    const server = await serverService.findByAuthKey(serverIdHeader);
+    if (!server) {
+      return reply.code(403).send({ error: 'Unknown server id' });
+    }
+    (request as any).pluginServerId = server.id;
   }
 }
 
@@ -167,6 +178,13 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       const delivery = await PaymentDelivery.findOne({ where: { paymentId, serverId } });
       if (!delivery) {
         return reply.code(404).send({ error: 'No pending delivery for this server' });
+      }
+
+      // Idempotency: a plugin that already reported success might retry the
+      // POST (network blip, restart). Don't overwrite a final state — just
+      // ack so the plugin stops nagging us.
+      if (delivery.status === 'delivered') {
+        return { status: 'ok', paymentStatus: payment.status, deliveryStatus: 'delivered', alreadyReported: true };
       }
 
       const existingLogs = (delivery.meta?.deliveryLogs as any[] | undefined) || [];

@@ -108,6 +108,15 @@ export class DeliveryService {
 
     const serverIds = (product.servers || []).map((s) => s.id);
 
+    // Product with no commands: nothing to execute on any server.
+    if ((product.commands || []).length === 0) {
+      await payment.update({
+        status: 'delivered',
+        deliveredAt: new Date(),
+      });
+      return;
+    }
+
     if (serverIds.length === 0) {
       await payment.update({
         status: 'failed',
