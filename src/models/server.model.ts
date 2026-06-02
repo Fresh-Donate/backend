@@ -50,7 +50,7 @@ export class Server extends Model<ServerAttributes, ServerCreationAttributes> {
   declare updatedAt: Date;
 
   @DeletedAt
-  @Column({ field: 'deleted_at' })
+  @Column({ type: DataType.DATE, field: 'deleted_at' })
   declare deletedAt: Date | null;
 
   @BelongsToMany(() => Product, () => ProductServer)
