@@ -42,6 +42,54 @@ export const sequelize = new SequelizeTS({
   },
 });
 
+// Idempotent DDL for the multi-server tables
+async function migrateMultiServerTables(db: Sequelize): Promise<void> {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS servers (
+      id VARCHAR(64) PRIMARY KEY,
+      name VARCHAR(128) NOT NULL,
+      ip VARCHAR(256) NOT NULL DEFAULT '',
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      deleted_at TIMESTAMP WITH TIME ZONE NULL
+    );
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS product_servers (
+      product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      server_id  VARCHAR(64) NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      PRIMARY KEY (product_id, server_id)
+    );
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS payment_deliveries (
+      id           UUID PRIMARY KEY,
+      payment_id   UUID NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+      server_id    VARCHAR(64) NOT NULL REFERENCES servers(id),
+      status       VARCHAR(16) NOT NULL DEFAULT 'pending',
+      delivered_at TIMESTAMP WITH TIME ZONE NULL,
+      meta         JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS payment_deliveries_payment_server_unique
+      ON payment_deliveries (payment_id, server_id);
+  `);
+
+  // Defensive: sync({ alter: true }) usually adds this column, but if that
+  // step ever fails silently the settings API would 500 on every read. The
+  // idempotent ADD closes the gap.
+  await db.query(`
+    ALTER TABLE settings
+      ADD COLUMN IF NOT EXISTS multi_server_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+}
+
 async function migrateCustomersToSnapshot(db: Sequelize): Promise<void> {
   const [row] = await db.query<{ regclass: string | null }>(
     `SELECT to_regclass('public.customers')::text AS regclass`,
@@ -89,6 +137,7 @@ export async function initDatabase(): Promise<void> {
     console.log('Database connection established successfully.');
 
     await migrateCustomersToSnapshot(sequelize as unknown as Sequelize);
+    await migrateMultiServerTables(sequelize as unknown as Sequelize);
 
     sequelize.sync({ alter: true }).then(() => {
       console.log('Database synced.');
