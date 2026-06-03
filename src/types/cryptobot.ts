@@ -70,7 +70,7 @@ export interface CryptoBotWebhookUpdate {
 }
 
 export interface CreateCryptoBotInvoiceParams {
-  /** Default 'fiat' — buyer enters a fiat amount, pays in any supported crypto. */
+  /** Default 'fiat' - buyer enters a fiat amount, pays in any supported crypto. */
   currencyType?: 'crypto' | 'fiat';
   /** Required when currencyType === 'crypto'. */
   asset?: CryptoBotAsset;

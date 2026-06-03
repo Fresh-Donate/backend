@@ -4,7 +4,7 @@ import { config } from '@/config';
 
 export default fp<FastifyRedisPluginOptions>(async (fastify) => {
   if (process.env.SKIP_REDIS === 'true') {
-    fastify.log.info('SKIP_REDIS=true — skipping redis plugin registration');
+    fastify.log.info('SKIP_REDIS=true - skipping redis plugin registration');
     return;
   }
   fastify.register(fastifyRedis, {

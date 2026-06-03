@@ -55,6 +55,16 @@ const DEFAULT_PROVIDERS: ProviderDefinition[] = [
     supportedCurrencies: ['RUB'],
   },
   {
+    providerId: 'robokassa',
+    name: 'Robokassa',
+    description: 'Приём платежей для РФ через Robokassa: банковские карты, СБП, электронные кошельки. Поддерживает тестовый режим.',
+    icon: 'i-lucide-receipt',
+    credentials: { merchantLogin: '', password1: '', password2: '' },
+    providerConfig: { hashAlgorithm: 'sha256' },
+    commissionPercent: 3.9,
+    supportedCurrencies: ['RUB'],
+  },
+  {
     providerId: 'tebex',
     name: 'Tebex',
     description: 'Tebex Headless API. Принимает платежи в валюте Tebex-аккаунта (USD или EUR), требует базовой проверки личности и заведения 6 coin-пакетов в Tebex Dashboard (0.01 / 0.1 / 1 / 10 / 100 / 1000).',

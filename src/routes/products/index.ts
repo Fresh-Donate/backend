@@ -29,7 +29,7 @@ const productRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         await request.jwtVerify();
         includeHidden = true;
       } catch {
-        // ignore — fall through to public view
+        // ignore - fall through to public view
       }
     }
     if (!includeHidden) {

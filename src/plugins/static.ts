@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { config } from '@/config';
 
 // Files are content-addressed (UUID-based filenames produced by ImageService),
-// so they're effectively immutable — that lets us send Cache-Control:
+// so they're effectively immutable - that lets us send Cache-Control:
 // immutable + 1y maxAge and let proxies / CDN / browsers cache aggressively.
 export default fp(async (fastify) => {
   const uploadsRoot = resolve(process.cwd(), config.uploads.dir);

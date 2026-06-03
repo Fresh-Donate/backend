@@ -55,7 +55,7 @@ export const DEFAULT_SMTP_CONFIG: SmtpConfig = {
 };
 
 export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplate = {
-  subject: 'Чек о покупке — {productName} ({shopName})',
+  subject: 'Чек о покупке - {productName} ({shopName})',
   html: `<!doctype html>
 <html lang="ru">
 <head>
@@ -74,7 +74,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplate = {
       <td style="padding:24px 28px;">
         <p style="margin:0 0 16px;font-size:15px;line-height:1.5;">
           Привет, <strong>{nickname}</strong>! Мы получили вашу оплату.
-          Это письмо — подтверждение покупки. Сохраните его — при обращении в поддержку
+          Это письмо - подтверждение покупки. Сохраните его - при обращении в поддержку
           сообщите номер заказа ниже.
         </p>
 
@@ -118,7 +118,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplate = {
     <tr>
       <td style="padding:18px 28px;background:#f8fafc;border-top:1px solid #e6e8eb;font-size:12px;color:#6b7280;text-align:center;">
         Это автоматическое письмо. Отвечать на него не нужно.<br />
-        Если есть вопросы — напишите на {contactEmail}.
+        Если есть вопросы - напишите на {contactEmail}.
       </td>
     </tr>
   </table>

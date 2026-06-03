@@ -100,7 +100,7 @@ export class YooKassaGateway {
     }
   }
 
-  // YooKassa webhooks come from a fixed set of IPs (no signing) —
+  // YooKassa webhooks come from a fixed set of IPs (no signing) -
   // see https://yookassa.ru/developers/using-api/webhooks
   static isValidWebhookIp(ip: string): boolean {
     const allowedCidrs = [

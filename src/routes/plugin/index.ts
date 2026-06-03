@@ -12,7 +12,7 @@ const serverService = new ServerService();
 
 // Auth flow:
 //   1. X-Api-Key is ALWAYS the global settings.plugin_config.token. It
-//      authenticates the plugin regardless of mode — like before.
+//      authenticates the plugin regardless of mode - like before.
 //   2. multi_server_enabled=true: X-Server-Id additionally tells the backend
 //      which server this plugin represents. Used for routing PaymentDelivery
 //      rows. The id alone is NOT a credential; without a valid api key it
@@ -174,14 +174,14 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     if (serverId) {
       // Multi-server: update the PaymentDelivery row for this (payment, server)
       // pair only. Payment.status flips to 'delivered' once every bound server
-      // reports success — partial completion stays in 'paid'.
+      // reports success - partial completion stays in 'paid'.
       const delivery = await PaymentDelivery.findOne({ where: { paymentId, serverId } });
       if (!delivery) {
         return reply.code(404).send({ error: 'No pending delivery for this server' });
       }
 
       // Idempotency: a plugin that already reported success might retry the
-      // POST (network blip, restart). Don't overwrite a final state — just
+      // POST (network blip, restart). Don't overwrite a final state - just
       // ack so the plugin stops nagging us.
       if (delivery.status === 'delivered') {
         return { status: 'ok', paymentStatus: payment.status, deliveryStatus: 'delivered', alreadyReported: true };
@@ -218,7 +218,7 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       }
 
       // Roll up: when no pending rows remain for this payment, the buyer is
-      // fully delivered. We don't auto-fail on partial server failures — the
+      // fully delivered. We don't auto-fail on partial server failures - the
       // plugin retries on its end and the admin can also retry from the panel.
       const stillPending = await PaymentDelivery.count({
         where: { paymentId, status: { [Op.in]: ['pending', 'failed'] as ('pending' | 'failed')[] } },

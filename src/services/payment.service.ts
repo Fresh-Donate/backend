@@ -22,6 +22,7 @@ import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
 import { TebexGateway } from '@/gateways/tebex.gateway';
 import { CryptoBotGateway } from '@/gateways/cryptobot.gateway';
+import { RobokassaGateway } from '@/gateways/robokassa.gateway';
 import { config } from '@/config';
 import { buildAmountInTargetSql, convert, toBaseCurrency, isSupportedCurrency } from '@/utils/currency';
 import type {
@@ -29,6 +30,8 @@ import type {
   CreatePaymentDto,
   UpgradeEvaluation,
   WataWebhookPayload,
+  RobokassaWebhookPayload,
+  RobokassaHashAlgorithm,
   TebexWebhookEnvelope,
   CryptoBotWebhookUpdate,
   CryptoBotFiat,
@@ -104,7 +107,7 @@ export class PaymentService {
       throw new NotFoundError('Product not found');
     }
 
-    // Privilege products are rank-style — count is always 1, ignoring whatever
+    // Privilege products are rank-style - count is always 1, ignoring whatever
     // the client sent. Other products honour custom-count when allowed.
     const isPrivilege = product.type === 'privilege';
     const count = isPrivilege
@@ -153,7 +156,7 @@ export class PaymentService {
     if (upgradeEval.blocked) {
       throw new ValidationError(
         upgradeEval.reference
-          ? `Этот товар нельзя купить — на нике "${data.nickname}" уже есть "${upgradeEval.reference.productName}" из этой группы.`
+          ? `Этот товар нельзя купить - на нике "${data.nickname}" уже есть "${upgradeEval.reference.productName}" из этой группы.`
           : 'Этот товар уже куплен на указанном нике.',
       );
     }
@@ -196,7 +199,7 @@ export class PaymentService {
         );
         if (chargedInBase + 1e-9 < minAmount) {
           throw new ValidationError(
-            `Минимальная сумма для оплаты через ${provider.name} — ${minAmount} ${settings.base_currency}.`,
+            `Минимальная сумма для оплаты через ${provider.name} - ${minAmount} ${settings.base_currency}.`,
           );
         }
       }
@@ -285,7 +288,7 @@ export class PaymentService {
       const yooPayment = await gateway.createPayment({
         amount: Number(payment.totalAmount),
         currency: payment.currency,
-        description: `${productName} — FreshDonate`,
+        description: `${productName} - FreshDonate`,
         returnUrl: `${returnUrl}?paymentId=${payment.id}`,
         metadata: {
           payment_id: payment.id,
@@ -343,7 +346,7 @@ export class PaymentService {
         amount: Number(payment.totalAmount),
         currency,
         orderId: payment.id,
-        description: `${productName} — FreshDonate`,
+        description: `${productName} - FreshDonate`,
         successRedirectUrl: `${returnUrl}?paymentId=${payment.id}`,
         failRedirectUrl: `${returnUrl}?paymentId=${payment.id}&failed=1`,
       });
@@ -373,7 +376,7 @@ export class PaymentService {
         currencyType: 'fiat',
         fiat: payment.currency as CryptoBotFiat,
         amount: Number(payment.totalAmount),
-        description: `${productName} — FreshDonate`,
+        description: `${productName} - FreshDonate`,
         payload: payment.id,
         paidBtnName: 'callback',
         paidBtnUrl: `${returnUrl}?paymentId=${payment.id}`,
@@ -395,6 +398,46 @@ export class PaymentService {
         meta: {
           ...payment.meta,
           cryptobot: { testMode: provider.testMode, hash: invoice.hash },
+        },
+      });
+    } else if (provider.providerId === 'robokassa') {
+      const { merchantLogin, password1, password2 } = provider.credentials;
+      if (!merchantLogin || !password1 || !password2) {
+        throw new PaymentError(
+          'Robokassa credentials not configured. Set merchantLogin, password1 and password2 in payment provider settings.',
+          'ROBOKASSA_NOT_CONFIGURED',
+        );
+      }
+
+      const hashAlgorithm = ((provider.providerConfig?.hashAlgorithm as RobokassaHashAlgorithm) || 'sha256');
+      const gateway = new RobokassaGateway(
+        merchantLogin,
+        password1,
+        password2,
+        provider.testMode,
+        hashAlgorithm,
+      );
+
+      const invId = RobokassaGateway.makeInvId(payment.id);
+      const link = gateway.createPaymentLink({
+        amount: Number(payment.totalAmount),
+        invId,
+        description: `${productName} - FreshDonate`,
+        email: payment.customerEmail || undefined,
+        userParams: { paymentId: payment.id },
+      });
+
+      await payment.update({
+        providerId: provider.providerId,
+        externalPaymentId: String(link.invId),
+        externalPaymentUrl: link.url,
+        meta: {
+          ...payment.meta,
+          robokassa: {
+            invId: link.invId,
+            testMode: provider.testMode,
+            hashAlgorithm,
+          },
         },
       });
     } else if (provider.providerId === 'tebex') {
@@ -625,7 +668,7 @@ export class PaymentService {
   }
 
   async handleWataWebhook(payload: WataWebhookPayload): Promise<void> {
-    // Wata pre-payment notifications may arrive without a transactionStatus —
+    // Wata pre-payment notifications may arrive without a transactionStatus -
     // safe to ignore until the post-payment one lands.
     const status = payload.transactionStatus || payload.status;
     if (!status) {
@@ -657,7 +700,7 @@ export class PaymentService {
     if (status === 'Paid' && (payment.status === 'pending' || payment.status === 'expired')) {
       const paidAmount = payload.amount !== undefined ? Number(payload.amount) : Number(payment.totalAmount);
 
-      // Wata webhooks don't carry commission — keep our pre-charge estimate.
+      // Wata webhooks don't carry commission - keep our pre-charge estimate.
       await payment.update({
         status: 'paid',
         paidAt: payload.paymentTime ? new Date(payload.paymentTime) : new Date(),
@@ -699,6 +742,76 @@ export class PaymentService {
     }
   }
 
+  // Robokassa ResultURL: form-urlencoded body. We resolve the payment by
+  // Shp_paymentId (our UUID) first, then fall back to InvId stored in
+  // externalPaymentId. Returns true on success - caller responds with
+  // `OK<InvId>` so Robokassa stops retrying.
+  async handleRobokassaWebhook(payload: RobokassaWebhookPayload): Promise<boolean> {
+    if (!payload.OutSum || !payload.InvId) return false;
+
+    let payment: Payment | null = null;
+
+    const shpPaymentId = payload.Shp_paymentId;
+    if (typeof shpPaymentId === 'string' && shpPaymentId) {
+      payment = await Payment.findByPk(shpPaymentId);
+    }
+
+    if (!payment) {
+      payment = await Payment.findOne({
+        where: {
+          providerId: 'robokassa',
+          externalPaymentId: payload.InvId,
+        },
+      });
+    }
+
+    if (!payment) {
+      console.warn(
+        `Robokassa webhook: payment not found (InvId=${payload.InvId} shpPaymentId=${shpPaymentId})`,
+      );
+      return false;
+    }
+
+    if (payment.status !== 'pending' && payment.status !== 'expired') {
+      return true;
+    }
+
+    const paidAmount = Number(payload.OutSum);
+    const fee = payload.Fee !== undefined ? Number(payload.Fee) : undefined;
+
+    const updateData: Record<string, any> = {
+      status: 'paid',
+      paidAt: new Date(),
+      totalAmount: Number.isFinite(paidAmount) ? paidAmount : Number(payment.totalAmount),
+    };
+
+    if (fee !== undefined && Number.isFinite(fee)) {
+      updateData.commissionAmount = fee;
+      updateData.providerAmount = Math.round((paidAmount - fee) * 100) / 100;
+      updateData.commissionPercent = paidAmount > 0
+        ? Math.round((fee / paidAmount) * 10000) / 100
+        : 0;
+    }
+
+    updateData.meta = {
+      ...payment.meta,
+      robokassa: {
+        ...(payment.meta.robokassa || {}),
+        invId: payload.InvId,
+        paymentMethod: payload.PaymentMethod,
+        incCurrLabel: payload.IncCurrLabel,
+        email: payload.EMail,
+      },
+    };
+
+    await payment.update(updateData);
+    await this.onPaymentPaid(payment.id);
+    paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+
+    console.log(`Robokassa: payment ${payment.id} succeeded (InvId: ${payload.InvId})`);
+    return true;
+  }
+
   // Tebex webhooks are wrapped as { id, type, date, subject }. We key off
   // the `type` (payment.completed / declined / refunded) and look up the
   // Payment by the `payment_id` we stashed in basket.custom at checkout
@@ -707,7 +820,7 @@ export class PaymentService {
     const { type, subject } = envelope;
 
     // Tebex sends `validation.webhook` once when a new endpoint is added in
-    // their panel — no subject, nothing to process, just ack it.
+    // their panel - no subject, nothing to process, just ack it.
     if (type === 'validation.webhook' || !subject) {
       return;
     }
@@ -801,7 +914,7 @@ export class PaymentService {
   async confirmPayment(paymentId: string): Promise<PaymentDto> {
     const payment = await Payment.findByPk(paymentId);
     if (!payment) throw new NotFoundError('Payment not found');
-    // Allow rescuing an auto-expired payment too — useful when webhook
+    // Allow rescuing an auto-expired payment too - useful when webhook
     // arrived late or buyer paid offline.
     if (payment.status !== 'pending' && payment.status !== 'expired') {
       throw new ValidationError('Payment is not pending');

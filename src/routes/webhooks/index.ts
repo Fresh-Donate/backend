@@ -5,8 +5,9 @@ import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
 import { TebexGateway } from '@/gateways/tebex.gateway';
 import { CryptoBotGateway } from '@/gateways/cryptobot.gateway';
+import { RobokassaGateway } from '@/gateways/robokassa.gateway';
 import { PaymentProvider } from '@/models/payment-provider.model';
-import type { CryptoBotWebhookUpdate } from '@/types';
+import type { CryptoBotWebhookUpdate, RobokassaHashAlgorithm, RobokassaWebhookPayload } from '@/types';
 
 const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const paymentService = new PaymentService();
@@ -34,7 +35,26 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     },
   );
 
-  // YooKassa: no signing — validated by source IP. x-forwarded-for takes
+  // Robokassa ResultURL posts data as application/x-www-form-urlencoded.
+  // Fastify doesn't ship a default parser for it - we add a minimal one here
+  // that decodes into a flat string map.
+  fastify.addContentTypeParser(
+    'application/x-www-form-urlencoded',
+    { parseAs: 'string' },
+    (_req, body, done) => {
+      const text = (body as string) || '';
+      try {
+        const params = new URLSearchParams(text);
+        const result: Record<string, string> = {};
+        for (const [key, value] of params) result[key] = value;
+        done(null, result);
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
+
+  // YooKassa: no signing - validated by source IP. x-forwarded-for takes
   // priority when behind a reverse proxy (Docker, nginx).
   fastify.post<{
     Body: {
@@ -74,7 +94,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     try {
       await paymentService.handleYooKassaWebhook(event, object);
     } catch (error: any) {
-      // Log but don't fail — YooKassa retries on non-200, and we'd rather
+      // Log but don't fail - YooKassa retries on non-200, and we'd rather
       // ack a flawed payload than receive duplicates.
       request.log.error(`YooKassa webhook processing error: ${error.message}`);
     }
@@ -128,7 +148,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
   // CryptoBot (Crypto Pay) signs the raw body with HMAC-SHA256 using
   // SHA256(apiToken) as the key. Signature is in `crypto-pay-api-signature`.
-  // No fixed IP list — signature is the only authenticity check.
+  // No fixed IP list - signature is the only authenticity check.
   fastify.post<{ Body: Record<string, any> }>('/cryptobot', {
     config: { rateLimit: { max: 200, timeWindow: 60000 } },
   }, async (request, reply) => {
@@ -228,7 +248,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   // Tebex: HMAC-SHA256 over hex(SHA256(rawBody)) keyed by webhookSecret,
   // delivered in X-Signature. When admin first registers the endpoint in
   // the Tebex panel, Tebex sends a `validation.webhook` event and expects
-  // us to echo back its `id` in the JSON response body — otherwise the
+  // us to echo back its `id` in the JSON response body - otherwise the
   // endpoint stays in "Cannot be validated" state. Real payment events
   // accept any 2xx ack.
   fastify.post<{ Body: Record<string, any> }>('/tebex', {
@@ -268,7 +288,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       `Tebex webhook: type=${payload.type} id=${payload.id} tx=${payload.subject?.transaction_id}`,
     );
 
-    // Validation handshake — must echo back the envelope id, nothing else.
+    // Validation handshake - must echo back the envelope id, nothing else.
     if (payload.type === 'validation.webhook') {
       return reply.code(200).send({ id: payload.id });
     }
@@ -280,6 +300,58 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     }
 
     return reply.code(200).send({ id: payload.id });
+  });
+
+  // Robokassa ResultURL: form-urlencoded body, signed with password2. Must
+  // respond with plain text `OK<InvId>` so Robokassa marks the notification
+  // delivered and stops retrying. Anything else (including 200 with a
+  // different body) keeps the queue rolling.
+  fastify.post<{ Body: RobokassaWebhookPayload }>('/robokassa', {
+    config: { rateLimit: { max: 200, timeWindow: 60000 } },
+  }, async (request, reply) => {
+    const payload = (request.body || {}) as RobokassaWebhookPayload;
+
+    const provider = await PaymentProvider.findOne({ where: { providerId: 'robokassa' } });
+    if (!provider) {
+      request.log.error('Robokassa webhook: provider not found in database');
+      return reply.code(200).type('text/plain').send('OK0');
+    }
+
+    const { merchantLogin, password1, password2 } = provider.credentials;
+
+    const skipSig = process.env.NODE_ENV === 'development'
+      || process.env.ROBOKASSA_SKIP_SIGNATURE_CHECK === 'true';
+
+    if (!skipSig) {
+      if (!merchantLogin || !password1 || !password2) {
+        request.log.warn('Robokassa webhook rejected: credentials not configured');
+        return reply.code(403).send({ error: 'Not configured' });
+      }
+      const hashAlgorithm = ((provider.providerConfig?.hashAlgorithm as RobokassaHashAlgorithm) || 'sha256');
+      const gateway = new RobokassaGateway(
+        merchantLogin,
+        password1,
+        password2,
+        provider.testMode,
+        hashAlgorithm,
+      );
+      if (!gateway.verifyWebhookSignature(payload)) {
+        request.log.warn('Robokassa webhook rejected: invalid signature');
+        return reply.code(403).send({ error: 'Invalid signature' });
+      }
+    }
+
+    request.log.info(
+      `Robokassa webhook: InvId=${payload.InvId} OutSum=${payload.OutSum} Shp_paymentId=${payload.Shp_paymentId}`,
+    );
+
+    try {
+      await paymentService.handleRobokassaWebhook(payload);
+    } catch (error: any) {
+      request.log.error(`Robokassa webhook processing error: ${error.message}`);
+    }
+
+    return reply.code(200).type('text/plain').send(`OK${payload.InvId ?? ''}`);
   });
 };
 

@@ -9,7 +9,7 @@ import { BaseModel } from './base.model';
 
 /**
  * Closed list of "who runs this shop" categories used in the public legal
- * pages. Empty string means the admin chose not to disclose — the legal
+ * pages. Empty string means the admin chose not to disclose - the legal
  * pages then render "не указано" placeholders rather than fabricating data.
  */
 export type OwnerType = '' | 'individual' | 'self_employed' | 'sole_proprietor' | 'legal_entity';
@@ -27,7 +27,7 @@ interface ShopSettingsAttributes {
    */
   shopUrl: string;
   // Identifying info shown on the public legal pages (offer / terms /
-  // privacy). All optional — admin can leave them blank if they don't want
+  // privacy). All optional - admin can leave them blank if they don't want
   // to disclose. INN/contact email are recommended though, since 152-ФЗ
   // requires a contact for data-subject requests.
   ownerName: string;

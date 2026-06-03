@@ -46,7 +46,7 @@ export function totalDiscountPercent(active: ProductPromotionDto[]): number {
   return Math.min(active.reduce((acc, p) => acc + p.discountPercent, 0), 100);
 }
 
-// Round to 2 decimals to match `DECIMAL(10, 2)` on the products table —
+// Round to 2 decimals to match `DECIMAL(10, 2)` on the products table -
 // otherwise float drift accumulates between display and charge.
 export function applyDiscount(price: number, percent: number): number {
   if (percent <= 0) return Math.round(price * 100) / 100;

@@ -41,7 +41,7 @@ function normalizeCurrencyRates(rates: CurrencyRates | undefined, base: Supporte
 }
 
 // Always emit a populated rate map for the two non-base currencies so the
-// panel never has to decide what to render for an empty cell — missing
+// panel never has to decide what to render for an empty cell - missing
 // entries are filled with defaults.
 function fillRatesForBase(stored: CurrencyRates | null | undefined, base: SupportedCurrency): CurrencyRates {
   const raw = stored ?? {};
@@ -168,7 +168,7 @@ export class SettingsService {
 
     // Multi-server only works with the plugin delivery method (RCON has no
     // per-server routing). Block toggling either knob into an inconsistent
-    // state — the panel mirrors this constraint, but enforce server-side too.
+    // state - the panel mirrors this constraint, but enforce server-side too.
     const currentMulti = settings.multi_server_enabled ?? false;
     const nextMulti = data.multi_server_enabled ?? currentMulti;
     const currentDelivery = settings.delivery_method;

@@ -4,7 +4,7 @@ import { config } from './index';
 
 const { host, port, name, user, password } = config.database;
 
-// Import all entity models here (NOT base.model — it's abstract)
+// Import all entity models here (NOT base.model - it's abstract)
 import { ShopSettings } from '@/models/shop-settings.model';
 import { Product } from '@/models/product.model';
 import { Settings } from '@/models/settings.model';
@@ -129,7 +129,7 @@ async function migrateCustomersToSnapshot(db: Sequelize): Promise<void> {
 
 export async function initDatabase(): Promise<void> {
   if (process.env.SKIP_DB === 'true') {
-    console.log('SKIP_DB=true — skipping database initialization');
+    console.log('SKIP_DB=true - skipping database initialization');
     return;
   }
   try {

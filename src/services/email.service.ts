@@ -10,6 +10,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   yookassa: 'ЮKassa',
   heleket: 'Heleket',
   wata: 'Wata',
+  robokassa: 'Robokassa',
   cryptobot: 'CryptoBot',
   tebex: 'Tebex',
 };
@@ -44,7 +45,7 @@ function formatMoney(value: number): string {
 }
 
 function formatDate(value: Date | null | undefined): string {
-  if (!value) return '—';
+  if (!value) return '-';
   return new Intl.DateTimeFormat('ru-RU', {
     day: '2-digit',
     month: '2-digit',
@@ -82,8 +83,8 @@ function buildVars(payload: {
   const quantity = payment
     ? String((product?.quantity ?? payment.quantity ?? 1) * (payment.userSelectedCount || 1))
     : '1';
-  const providerId = payment?.providerId || '—';
-  const providerName = providerId === '—' ? '—' : (PROVIDER_NAMES[providerId] || providerId);
+  const providerId = payment?.providerId || '-';
+  const providerName = providerId === '-' ? '-' : (PROVIDER_NAMES[providerId] || providerId);
 
   return {
     paymentId: payment?.id || 'preview-payment-id',
@@ -91,7 +92,7 @@ function buildVars(payload: {
     nickname: payment?.customerNickname || 'Steve',
     email: payment?.customerEmail || 'buyer@example.com',
     productName,
-    productId: payment?.productId || product?.id || '—',
+    productId: payment?.productId || product?.id || '-',
     quantity,
     userSelectedCount: String(payment?.userSelectedCount || 1),
     productPrice: formatMoney(Number(payment?.productPrice ?? product?.price ?? 0)),
@@ -100,7 +101,7 @@ function buildVars(payload: {
     currency: payment?.currency || product?.currency || 'RUB',
     providerName,
     providerId,
-    externalPaymentId: payment?.externalPaymentId || '—',
+    externalPaymentId: payment?.externalPaymentId || '-',
     paidAt: formatDate(payment?.paidAt ?? new Date()),
     status: payment?.status || 'paid',
     shopName: shop.name || 'FreshDonate Shop',

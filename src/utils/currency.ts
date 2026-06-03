@@ -1,8 +1,8 @@
 /**
  * Cross-currency math used by the panel-wide settings.
  *
- * The platform supports a tight allow-list of three currencies — RUB, USD,
- * EUR — one of which the admin nominates as the *base*. Rates are stored as
+ * The platform supports a tight allow-list of three currencies - RUB, USD,
+ * EUR - one of which the admin nominates as the *base*. Rates are stored as
  * "how many units of the base in 1 unit of the given currency", so e.g. with
  * base RUB and `{ USD: 95, EUR: 100 }`, 1 USD = 95 RUB.
  *
@@ -24,7 +24,7 @@ export function isSupportedCurrency(code: string): code is SupportedCurrency {
 }
 
 /**
- * Sensible starting rates per base — used on first install and whenever the
+ * Sensible starting rates per base - used on first install and whenever the
  * admin switches the base, so the rate map is always populated for the
  * other two currencies. Values are approximate; the admin tunes them after.
  */
@@ -40,7 +40,7 @@ export function defaultRatesFor(base: SupportedCurrency): CurrencyRates {
 
 /**
  * Convert `amount` from `currency` into the base currency using the supplied
- * rate map. Unknown currencies fall through unchanged (treated as 1:1) —
+ * rate map. Unknown currencies fall through unchanged (treated as 1:1) -
  * better than silently dropping the amount, and visible in the UI for the
  * admin to fix.
  */
@@ -67,7 +67,7 @@ export function convert(amount: number, fromCurrency: string, toCurrency: string
 /**
  * Build a SQL `CASE` expression that converts a `total_amount` column into
  * the base currency inline, so a row can be ORDER'd by its base value
- * without a post-query sort. Rates are inlined as numeric literals — they're
+ * without a post-query sort. Rates are inlined as numeric literals - they're
  * the admin's own data, not user input, but we still coerce via `Number()`
  * so a corrupted JSONB value can't slip a string into the SQL.
  *
@@ -105,7 +105,7 @@ export function buildAmountInTargetSql(
 ): string {
   const denom = target === base ? 1 : Number(rates?.[target]);
   // Without a usable target rate we can't produce meaningful conversion
-  // factors. Pass amounts through untouched — visibly wrong in the UI is
+  // factors. Pass amounts through untouched - visibly wrong in the UI is
   // better than silently zeroing rows out.
   if (!Number.isFinite(denom) || denom <= 0) return amountColumn;
 
@@ -123,7 +123,7 @@ export function buildAmountInTargetSql(
     const numeric = Number(rate);
     if (!Number.isFinite(numeric) || numeric <= 0) continue;
     if (code === target) {
-      // Same currency — factor 1, written explicitly so the CASE is exhaustive.
+      // Same currency - factor 1, written explicitly so the CASE is exhaustive.
       branches.push(`WHEN '${code}' THEN ${amountColumn}`);
     } else {
       branches.push(`WHEN '${code}' THEN ${amountColumn} * ${numeric / denom}`);

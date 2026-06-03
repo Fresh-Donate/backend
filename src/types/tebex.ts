@@ -1,4 +1,4 @@
-// Tebex Headless API — https://docs.tebex.io/developers/headless-api/overview
+// Tebex Headless API - https://docs.tebex.io/developers/headless-api/overview
 // We can't pass arbitrary prices: every line item must reference a Package
 // already created in the Tebex Dashboard. To handle dynamic totals we keep a
 // set of "coin" packages (0.01 / 0.1 / 1 / 10 / 100 / 1000 in the account

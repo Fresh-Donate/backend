@@ -14,6 +14,7 @@ export * from './yookassa';
 export * from './heleket';
 export * from './cryptobot';
 export * from './wata';
+export * from './robokassa';
 export * from './tebex';
 export * from './stats';
 export * from './server';
