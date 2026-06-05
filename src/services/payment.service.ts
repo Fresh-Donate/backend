@@ -1085,13 +1085,16 @@ export class PaymentService {
     from: string;
     to: string;
     currency?: string;
+    tz?: string;
   }): Promise<StatsSummary> {
-    const { from, to, currency } = options;
+    const { from, to, currency, tz } = options;
 
     const settings = await this.settingsService.get();
     const requested = currency?.toUpperCase();
     const target =
       requested && isSupportedCurrency(requested) ? requested : settings.base_currency;
+
+    const safeTz = resolveTimeZone(tz);
 
     const fromDate = new Date(from);
     const toDate = new Date(to);
@@ -1116,7 +1119,10 @@ export class PaymentService {
       'currency',
     );
 
-    const dailyTrunc = "date_trunc('day', paid_at)";
+    // Format the day directly to a string in PostgreSQL so the result is not
+    // re-interpreted as Node-local `timestamp without time zone` by the pg
+    // driver (which would shift the bucket when Node's TZ differs).
+    const dailyTrunc = `to_char(date_trunc('day', paid_at AT TIME ZONE '${safeTz}'), 'YYYY-MM-DD')`;
     const paidStatuses = { [Op.in]: ['paid', 'delivered'] as PaymentStatus[] };
     const currentWhere = {
       status: paidStatuses,
@@ -1196,14 +1202,14 @@ export class PaymentService {
     const countByDay = new Map<string, number>();
     const customersByDay = new Map<string, number>();
     for (const row of dailyRows) {
-      const dayKey = new Date(row.date).toISOString().slice(0, 10);
+      const dayKey = truncatedRowToDayKey(row.date);
       amountByDay.set(dayKey, Number(row.amount) || 0);
       commissionByDay.set(dayKey, Number(row.commission) || 0);
       countByDay.set(dayKey, Number(row.count) || 0);
       customersByDay.set(dayKey, Number(row.customers) || 0);
     }
 
-    const days = eachDayUtc(fromDate, toDate);
+    const days = eachDayInTz(fromDate, toDate, safeTz);
     const round2 = (n: number): number => Math.round(n * 100) / 100;
 
     const revenueSparkline = days.map((d) => round2(amountByDay.get(d) || 0));
@@ -1270,13 +1276,44 @@ export class PaymentService {
   }
 }
 
-function eachDayUtc(from: Date, to: Date): string[] {
+function resolveTimeZone(tz?: string): string {
+  if (!tz) return 'UTC';
+  try {
+    // Throws RangeError for invalid IANA names — safe against SQL injection
+    // because we only embed strings that pass this validation.
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    return 'UTC';
+  }
+}
+
+function formatDayInTz(d: Date, tz: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d);
+  const y = parts.find((p) => p.type === 'year')?.value ?? '1970';
+  const m = parts.find((p) => p.type === 'month')?.value ?? '01';
+  const day = parts.find((p) => p.type === 'day')?.value ?? '01';
+  return `${y}-${m}-${day}`;
+}
+
+function eachDayInTz(from: Date, to: Date, tz: string): string[] {
+  const startStr = formatDayInTz(from, tz);
+  const endStr = formatDayInTz(to, tz);
   const days: string[] = [];
-  const cur = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
-  const end = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()));
+  const cur = new Date(`${startStr}T00:00:00Z`);
+  const end = new Date(`${endStr}T00:00:00Z`);
   while (cur <= end) {
     days.push(cur.toISOString().slice(0, 10));
     cur.setUTCDate(cur.getUTCDate() + 1);
   }
   return days;
+}
+
+function truncatedRowToDayKey(value: string | Date): string {
+  return String(value).slice(0, 10);
 }
