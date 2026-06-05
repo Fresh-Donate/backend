@@ -62,6 +62,16 @@ function toItemDto(i: PaymentItem): PaymentItemDto {
   };
 }
 
+function sortPaymentItems(p: Payment): void {
+  const items = p.items as PaymentItem[] | undefined;
+  if (!items || items.length < 2) return;
+  items.sort((a, b) => {
+    const ta = a.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a.createdAt).getTime();
+    const tb = b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime();
+    return ta - tb;
+  });
+}
+
 function toDto(p: Payment, items?: PaymentItem[]): PaymentDto {
   const itemRows = items ?? (p.items as PaymentItem[] | undefined);
   return {
@@ -590,9 +600,9 @@ export class PaymentService {
   private async findDtoById(id: string): Promise<PaymentDto | null> {
     const payment = await Payment.findByPk(id, {
       include: [{ model: PaymentItem, required: false }],
-      order: [[{ model: PaymentItem, as: 'items' }, 'created_at', 'ASC']],
     });
     if (!payment) return null;
+    sortPaymentItems(payment);
     return toDto(payment);
   }
 
@@ -1293,7 +1303,6 @@ export class PaymentService {
   async findById(id: string): Promise<PaymentDto | null> {
     const payment = await Payment.findByPk(id, {
       include: [{ model: PaymentItem, required: false }],
-      order: [[{ model: PaymentItem, as: 'items' }, 'created_at', 'ASC']],
     });
     if (!payment) return null;
 
@@ -1303,6 +1312,7 @@ export class PaymentService {
       await payment.update({ status: 'expired' });
     }
 
+    sortPaymentItems(payment);
     return toDto(payment);
   }
 
