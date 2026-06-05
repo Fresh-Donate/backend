@@ -88,6 +88,18 @@ async function migrateMultiServerTables(db: Sequelize): Promise<void> {
     ALTER TABLE settings
       ADD COLUMN IF NOT EXISTS multi_server_enabled BOOLEAN NOT NULL DEFAULT FALSE;
   `);
+
+  // Defensive: pre-normalize receipt_template before sync({ alter: true }) runs.
+  await db.query(`
+    ALTER TABLE settings
+      ADD COLUMN IF NOT EXISTS receipt_template JSONB;
+  `);
+  await db.query(`
+    ALTER TABLE settings ALTER COLUMN receipt_template DROP DEFAULT;
+  `);
+  await db.query(`
+    ALTER TABLE settings ALTER COLUMN receipt_template DROP NOT NULL;
+  `);
 }
 
 async function migrateCustomersToSnapshot(db: Sequelize): Promise<void> {

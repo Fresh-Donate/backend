@@ -168,7 +168,6 @@ export class Settings extends BaseModel<SettingsAttributes, SettingsCreationAttr
   @Column(DataType.JSONB)
   declare smtp_config: SmtpConfig;
 
-  @Default(DEFAULT_RECEIPT_TEMPLATE)
   @Column(DataType.JSONB)
   declare receipt_template: ReceiptTemplate;
 }
