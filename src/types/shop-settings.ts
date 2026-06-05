@@ -11,6 +11,7 @@ export interface ShopSettingsDto {
   ownerType: OwnerType;
   ownerInn: string;
   contactEmail: string;
+  cartEnabled: boolean;
   baseCurrency: SupportedCurrency;
   currencyRates: CurrencyRates;
 }

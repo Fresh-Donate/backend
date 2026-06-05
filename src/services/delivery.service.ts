@@ -1,10 +1,11 @@
 import { Payment } from '@/models/payment.model';
+import { PaymentItem } from '@/models/payment-item.model';
 import { Product } from '@/models/product.model';
 import { Server } from '@/models/server.model';
 import { PaymentDelivery } from '@/models/payment-delivery.model';
 import { RconService } from './rcon.service';
 import { SettingsService } from './settings.service';
-import { buildCommandVariables } from '@/utils/command-variables';
+import { buildCommandVariables, resolveCommandVariables } from '@/utils/command-variables';
 import type { DeliveryLog } from '@/types';
 
 const RETRY_DELAYS = [
@@ -32,15 +33,18 @@ export class DeliveryService {
       return;
     }
 
-    const payment = await Payment.findByPk(paymentId);
+    const payment = await Payment.findByPk(paymentId, {
+      include: [{ model: PaymentItem, required: false }],
+    });
     if (!payment) return;
     if (payment.status !== 'paid') return;
 
-    const product = await Product.findByPk(payment.productId);
-    if (!product) return;
-
-    const commands = product.commands || [];
-    if (commands.length === 0) {
+    // Resolve commands across every line item. Each item's commands are
+    // rendered with its own snapshot (count / product name), then flattened
+    // into a single RCON batch so the legacy single-product flow is just the
+    // N=1 case.
+    const resolvedCommands = await this.resolveOrderCommands(payment);
+    if (resolvedCommands.length === 0) {
       await payment.update({
         status: 'delivered',
         deliveredAt: new Date(),
@@ -52,10 +56,8 @@ export class DeliveryService {
     const attempt = logs.length + 1;
 
     try {
-      const results = await this.rconService.executeCommands(
-        commands,
-        buildCommandVariables(payment, product),
-      );
+      // Commands are already variable-resolved; pass an empty variable map.
+      const results = await this.rconService.executeCommands(resolvedCommands, {});
 
       const allSucceeded = results.every((r) => r.success);
 
@@ -96,20 +98,61 @@ export class DeliveryService {
     }
   }
 
+  // Load the order's line items together with their (current) products,
+  // including server bindings. Products deleted after purchase are simply
+  // absent from the map - their commands can no longer be executed.
+  private async loadItemsWithProducts(
+    payment: Payment,
+  ): Promise<{ items: PaymentItem[]; productById: Map<string, Product> }> {
+    const items = (payment.items as PaymentItem[] | undefined)
+      ?? await PaymentItem.findAll({ where: { paymentId: payment.id } });
+
+    const productIds = [...new Set(items.map((i) => i.productId))];
+    const products = productIds.length > 0
+      ? await Product.findAll({
+        where: { id: productIds },
+        include: [{ model: Server, through: { attributes: [] }, required: false }],
+      })
+      : [];
+    const productById = new Map(products.map((p) => [p.id, p]));
+    return { items, productById };
+  }
+
+  // Flatten an order into fully variable-resolved commands. When `serverId`
+  // is given, only items whose product is bound to that server contribute -
+  // this is how one cart fans different products to different servers.
+  private async resolveOrderCommands(payment: Payment, serverId?: string): Promise<string[]> {
+    const { items, productById } = await this.loadItemsWithProducts(payment);
+    const out: string[] = [];
+    for (const item of items) {
+      const product = productById.get(item.productId);
+      if (!product) continue;
+      if (serverId && !(product.servers || []).some((s) => s.id === serverId)) continue;
+      const vars = buildCommandVariables(payment, product, item);
+      for (const cmd of product.commands || []) {
+        out.push(resolveCommandVariables(cmd, vars));
+      }
+    }
+    return out;
+  }
+
   private async fanOutToServers(paymentId: string): Promise<void> {
-    const payment = await Payment.findByPk(paymentId);
+    const payment = await Payment.findByPk(paymentId, {
+      include: [{ model: PaymentItem, required: false }],
+    });
     if (!payment) return;
     if (payment.status !== 'paid') return;
 
-    const product = await Product.findByPk(payment.productId, {
-      include: [{ model: Server, through: { attributes: [] }, required: false }],
-    });
-    if (!product) return;
+    const { items, productById } = await this.loadItemsWithProducts(payment);
 
-    const serverIds = (product.servers || []).map((s) => s.id);
+    // Servers to fan out to = union of every item's product server bindings.
+    const serverIds = [...new Set(
+      items.flatMap((i) => (productById.get(i.productId)?.servers || []).map((s) => s.id)),
+    )];
 
-    // Product with no commands: nothing to execute on any server.
-    if ((product.commands || []).length === 0) {
+    // Nothing executable anywhere (no commands across all items): mark done.
+    const hasCommands = items.some((i) => (productById.get(i.productId)?.commands || []).length > 0);
+    if (!hasCommands) {
       await payment.update({
         status: 'delivered',
         deliveredAt: new Date(),

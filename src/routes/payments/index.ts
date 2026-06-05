@@ -46,6 +46,78 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   });
 
   fastify.post<{
+    Body: {
+      items: { productId: string; count?: number }[];
+      nickname: string;
+      email: string;
+      paymentOptionId: string;
+    };
+  }>('/cart', {
+    schema: {
+      body: {
+        type: 'object' as const,
+        required: ['items', 'nickname', 'email', 'paymentOptionId'],
+        properties: {
+          items: {
+            type: 'array' as const,
+            minItems: 1,
+            maxItems: 20,
+            items: {
+              type: 'object' as const,
+              required: ['productId'],
+              properties: {
+                productId: { type: 'string' as const },
+                count: { type: 'number' as const, minimum: 1, maximum: 100000 },
+              },
+            },
+          },
+          nickname: {
+            type: 'string' as const,
+            minLength: 3,
+            maxLength: 16,
+            pattern: '^[a-zA-Z0-9_]+$',
+          },
+          email: { type: 'string' as const, format: 'email', maxLength: 256 },
+          paymentOptionId: { type: 'string' as const },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
+    const customerIp = forwardedFor || request.ip || '';
+    const payment = await service.createCart({ ...request.body, customerIp });
+    return reply.code(201).send(payment);
+  });
+
+  fastify.post<{
+    Body: { items: { productId: string; count?: number }[]; nickname?: string };
+  }>('/cart/preview', {
+    schema: {
+      body: {
+        type: 'object' as const,
+        required: ['items'],
+        properties: {
+          items: {
+            type: 'array' as const,
+            maxItems: 20,
+            items: {
+              type: 'object' as const,
+              required: ['productId'],
+              properties: {
+                productId: { type: 'string' as const },
+                count: { type: 'number' as const, minimum: 1, maximum: 100000 },
+              },
+            },
+          },
+          nickname: { type: 'string' as const, maxLength: 16 },
+        },
+      },
+    },
+  }, async (request) => {
+    return service.previewCart(request.body.nickname || '', request.body.items || []);
+  });
+
+  fastify.post<{
     Body: { productId: string; nickname?: string };
   }>('/preview', {
     schema: {
@@ -71,6 +143,12 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       productName: payment.productName,
       totalAmount: payment.totalAmount,
       currency: payment.currency,
+      itemsCount: payment.itemsCount,
+      items: (payment.items || []).map((i) => ({
+        productName: i.productName,
+        userSelectedCount: i.userSelectedCount,
+        lineTotal: i.lineTotal,
+      })),
     };
   });
 

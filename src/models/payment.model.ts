@@ -3,9 +3,11 @@ import {
   Column,
   DataType,
   Default,
+  HasMany,
 } from 'sequelize-typescript';
 import { Optional } from 'sequelize';
 import { BaseModel } from './base.model';
+import { PaymentItem } from './payment-item.model';
 
 export type PaymentStatus = 'pending' | 'paid' | 'delivered' | 'failed' | 'refunded' | 'expired';
 
@@ -34,6 +36,7 @@ interface PaymentAttributes {
   createdAt: Date;
   updatedAt: Date;
   userSelectedCount: number;
+  itemsCount: number;
 }
 
 type PaymentCreationAttributes = Optional<
@@ -52,6 +55,7 @@ type PaymentCreationAttributes = Optional<
   | 'deliveredAt'
   | 'meta'
   | 'userSelectedCount'
+  | 'itemsCount'
   | 'createdAt'
   | 'updatedAt'
 >;
@@ -127,4 +131,15 @@ export class Payment extends BaseModel<PaymentAttributes, PaymentCreationAttribu
   @Default(1)
   @Column(DataType.INTEGER)
   declare userSelectedCount: number; // if product type is item, else - 1
+
+  // Number of distinct line items in this order. 1 for single-product
+  // purchases (the legacy path) and for backfilled historical payments;
+  // >1 only for cart checkouts. Denormalized so the payments list can show
+  // "N товаров" without joining payment_items.
+  @Default(1)
+  @Column(DataType.INTEGER)
+  declare itemsCount: number;
+
+  @HasMany(() => PaymentItem)
+  declare items: PaymentItem[];
 }

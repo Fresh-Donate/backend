@@ -2,6 +2,7 @@ import { Op } from 'sequelize';
 import { Product } from '@/models/product.model';
 import { Group } from '@/models/group.model';
 import { Payment } from '@/models/payment.model';
+import { PaymentItem } from '@/models/payment-item.model';
 import { Promotion } from '@/models/promotion.model';
 import { SettingsService } from './settings.service';
 import { activePromotionsAt, applyDiscount, totalDiscountPercent } from './promotion.service';
@@ -63,17 +64,24 @@ export class UpgradePricingService {
       const groupProductIds = await this.productIdsInGroup(group.id);
       if (groupProductIds.length === 0) continue;
 
-      const lastPayment = await Payment.findOne({
-        where: {
-          status: { [Op.in]: ['paid', 'delivered'] },
-          productId: { [Op.in]: groupProductIds },
-          customerNickname: nickname,
-        },
+      // Look across line items (not just payments.product_id) so an in-group
+      // product bought as a non-first item of a past cart still counts as a
+      // prior purchase to upgrade from.
+      const lastItem = await PaymentItem.findOne({
+        where: { productId: { [Op.in]: groupProductIds } },
+        include: [{
+          model: Payment,
+          required: true,
+          where: {
+            status: { [Op.in]: ['paid', 'delivered'] },
+            customerNickname: nickname,
+          },
+        }],
         order: [['created_at', 'DESC']],
       });
-      if (!lastPayment) continue;
+      if (!lastItem) continue;
 
-      const prior = await Product.findByPk(lastPayment.productId, {
+      const prior = await Product.findByPk(lastItem.productId, {
         include: [{ model: Promotion, through: { attributes: [] as string[] }, required: false }],
       });
       if (!prior) continue;

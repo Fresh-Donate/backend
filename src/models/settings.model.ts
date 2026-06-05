@@ -84,12 +84,10 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplate = {
             <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:13px;font-family:Menlo,Consolas,monospace;">{paymentId}</td>
           </tr>
           <tr>
-            <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:13px;color:#6b7280;">Товар</td>
-            <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:14px;font-weight:600;">{productName}</td>
-          </tr>
-          <tr>
-            <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:13px;color:#6b7280;">Количество</td>
-            <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:13px;">{quantity}</td>
+            <td colspan="2" style="padding:10px 0;border-bottom:1px solid #eef0f3;">
+              <div style="font-size:13px;color:#6b7280;margin-bottom:4px;">Состав заказа</div>
+              {itemsTable}
+            </td>
           </tr>
           <tr>
             <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:13px;color:#6b7280;">Сумма</td>

@@ -1,11 +1,64 @@
 import { type FastifyPluginAsync, type FastifyRequest, type FastifyReply } from 'fastify';
 import { Op } from 'sequelize';
 import { Payment } from '@/models/payment.model';
+import { PaymentItem } from '@/models/payment-item.model';
 import { Product } from '@/models/product.model';
+import { Server } from '@/models/server.model';
 import { PaymentDelivery } from '@/models/payment-delivery.model';
 import { SettingsService } from '@/services/settings.service';
 import { ServerService } from '@/services/server.service';
 import { buildCommandVariables, resolveCommandVariables } from '@/utils/command-variables';
+
+interface DeliveryEntry {
+  paymentId: string;
+  playerNickname: string;
+  productName: string;
+  commands: string[];
+  requireOnline: boolean;
+}
+
+async function buildDeliveryEntry(payment: Payment, serverId?: string): Promise<DeliveryEntry | null> {
+  const items = await PaymentItem.findAll({
+    where: { paymentId: payment.id },
+    order: [['created_at', 'ASC']],
+  });
+
+  const productIds = [...new Set(items.map((i) => i.productId))];
+  const products = productIds.length > 0
+    ? await Product.findAll({
+      where: { id: productIds },
+      include: [{ model: Server, through: { attributes: [] }, required: false }],
+    })
+    : [];
+  const productById = new Map(products.map((p) => [p.id, p]));
+
+  const commands: string[] = [];
+  let requireOnline = false;
+  for (const item of items) {
+    const product = productById.get(item.productId);
+    if (!product) continue;
+    if (serverId && !(product.servers || []).some((s) => s.id === serverId)) continue;
+    const rawCommands = product.commands || [];
+    if (rawCommands.length === 0) continue;
+    const variables = buildCommandVariables(payment, product, item);
+    for (const cmd of rawCommands) {
+      commands.push(resolveCommandVariables(cmd, variables));
+    }
+    // requireOnline for the batch is conservative: if any line needs the
+    // player online, the whole batch is held until they are.
+    if (!product.forceDelivery) requireOnline = true;
+  }
+
+  if (commands.length === 0) return null;
+
+  return {
+    paymentId: payment.id,
+    playerNickname: payment.customerNickname || '',
+    productName: payment.itemsCount > 1 ? `Заказ из ${payment.itemsCount} товаров` : payment.productName,
+    commands,
+    requireOnline,
+  };
+}
 
 const settingsService = new SettingsService();
 const serverService = new ServerService();
@@ -65,13 +118,7 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         limit: 50,
       });
 
-      const result: Array<{
-        paymentId: string;
-        playerNickname: string;
-        productName: string;
-        commands: string[];
-        requireOnline: boolean;
-      }> = [];
+      const result: DeliveryEntry[] = [];
 
       for (const delivery of deliveries) {
         const payment = await Payment.findByPk(delivery.paymentId);
@@ -80,22 +127,8 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         // created - skip those instead of replaying commands.
         if (payment.status !== 'paid') continue;
 
-        const product = await Product.findByPk(payment.productId);
-        if (!product) continue;
-
-        const rawCommands = product.commands || [];
-        if (rawCommands.length === 0) continue;
-
-        const variables = buildCommandVariables(payment, product);
-        const commands = rawCommands.map((cmd) => resolveCommandVariables(cmd, variables));
-
-        result.push({
-          paymentId: payment.id,
-          playerNickname: variables.player,
-          productName: payment.productName,
-          commands,
-          requireOnline: !product.forceDelivery,
-        });
+        const entry = await buildDeliveryEntry(payment, serverId);
+        if (entry) result.push(entry);
       }
 
       return result;
@@ -109,25 +142,11 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       limit: 50,
     });
 
-    const result = [];
+    const result: DeliveryEntry[] = [];
 
     for (const payment of payments) {
-      const product = await Product.findByPk(payment.productId);
-      if (!product) continue;
-
-      const rawCommands = product.commands || [];
-      if (rawCommands.length === 0) continue;
-
-      const variables = buildCommandVariables(payment, product);
-      const commands = rawCommands.map((cmd) => resolveCommandVariables(cmd, variables));
-
-      result.push({
-        paymentId: payment.id,
-        playerNickname: variables.player,
-        productName: payment.productName,
-        commands,
-        requireOnline: !product.forceDelivery,
-      });
+      const entry = await buildDeliveryEntry(payment);
+      if (entry) result.push(entry);
     }
 
     return result;
