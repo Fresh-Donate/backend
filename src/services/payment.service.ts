@@ -1374,21 +1374,30 @@ export class PaymentService {
     to: string;
     period: 'hourly' | 'daily' | 'weekly' | 'monthly';
     currency?: string;
+    tz?: string;
   }): Promise<{ date: string; amount: number; count: number }[]> {
-    const { from, to, period, currency } = options;
+    const { from, to, period, currency, tz } = options;
 
     const settings = await this.settingsService.get();
     const requested = currency?.toUpperCase();
     const target =
       requested && isSupportedCurrency(requested) ? requested : settings.base_currency;
 
-    const truncFn = period === 'monthly'
-      ? "date_trunc('month', paid_at)"
+    const safeTz = resolveTimeZone(tz);
+
+    // Truncate into the admin's local calendar, not the DB server's. Wrap the
+    // bucket in to_char so the value comes back as plain text in date-time form
+    // (no trailing Z), which the browser's Date parser interprets as local
+    // time — letting the frontend's local-tz interval enumerator line up the
+    // buckets without an extra TZ shift.
+    const truncBucket = period === 'monthly'
+      ? `date_trunc('month', paid_at AT TIME ZONE '${safeTz}')`
       : period === 'weekly'
-        ? "date_trunc('week', paid_at)"
+        ? `date_trunc('week', paid_at AT TIME ZONE '${safeTz}')`
         : period === 'hourly'
-          ? "date_trunc('hour', paid_at)"
-          : "date_trunc('day', paid_at)";
+          ? `date_trunc('hour', paid_at AT TIME ZONE '${safeTz}')`
+          : `date_trunc('day', paid_at AT TIME ZONE '${safeTz}')`;
+    const truncFn = `to_char(${truncBucket}, 'YYYY-MM-DD"T"HH24:MI:SS')`;
 
     const amountInTarget = buildAmountInTargetSql(
       settings.currency_rates,
