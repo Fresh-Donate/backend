@@ -1,4 +1,4 @@
-# FreshDonate — Backend
+# FreshDonate - Backend
 
 > REST API and payment/delivery core of the FreshDonate platform.
 
@@ -9,7 +9,7 @@ See also: [Shop](https://github.com/Fresh-Donate/shop) · [Admin Panel](https://
 
 ## About FreshDonate
 
-FreshDonate is a self‑hosted donation system for Minecraft servers. It lets you sell ranks, items, currency and any other in‑game goods through your own storefront, accept payments via multiple providers, and deliver purchases to players automatically the next time they are online — without any third‑party commission or lock‑in.
+FreshDonate is a self‑hosted donation system for Minecraft servers. It lets you sell ranks, items, currency and any other in‑game goods through your own storefront, accept payments via multiple providers, and deliver purchases to players automatically the next time they are online - without any third‑party commission or lock‑in.
 
 The platform is split into four repositories:
 
@@ -25,7 +25,7 @@ The platform is split into four repositories:
 The backend is the single source of truth for products, payments and customers. It:
 
 - serves the REST API consumed by the shop and the admin panel;
-- creates payments in external gateways (YooKassa, Heleket, Wata, Tebex, CryptoBot) and handles their webhooks;
+- creates payments in external gateways (YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot) and handles their webhooks;
 - stores pending deliveries and hands them to the in‑game plugin when a player logs in;
 - runs an RCON fallback for servers without the plugin installed;
 - issues JWT tokens for the admin panel and rate‑limits public endpoints.
@@ -43,7 +43,7 @@ The backend is the single source of truth for products, payments and customers. 
 
 - Node.js 20+
 - PostgreSQL 14+ (17 recommended)
-- Redis 6+ (optional in dev — set `SKIP_REDIS=true`)
+- Redis 6+ (optional in dev - set `SKIP_REDIS=true`)
 - For delivery: a running [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) **or** RCON access to the server
 
 ## Quick start (dev)
@@ -94,7 +94,7 @@ All configuration is read from environment variables (see `src/config/index.ts`)
 src/
   config/      env + sequelize bootstrap
   core/        base repository / service / controller, shared errors
-  gateways/    YooKassa, Heleket, Wata, Tebex, CryptoBot HTTP clients
+  gateways/    YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot HTTP clients
   models/      Sequelize models
   plugins/     Fastify plugins (jwt, cors, redis, rate-limit, error-handler)
   routes/      auth, products, payments, customers, stats, webhooks, plugin
@@ -114,9 +114,9 @@ test/          node:test suites (unit + route‑level)
 
 ## Related repositories
 
-- [fresh-donate-shop](https://github.com/Fresh-Donate/shop) — public storefront
-- [fresh-donate-panel](https://github.com/Fresh-Donate/panel) — admin panel
-- [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) — Minecraft delivery plugin
+- [fresh-donate-shop](https://github.com/Fresh-Donate/shop) - public storefront
+- [fresh-donate-panel](https://github.com/Fresh-Donate/panel) - admin panel
+- [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) - Minecraft delivery plugin
 
 ## License
 

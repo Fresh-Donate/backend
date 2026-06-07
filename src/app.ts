@@ -3,11 +3,12 @@ import { join } from 'node:path';
 import AutoLoad, { type AutoloadPluginOptions } from '@fastify/autoload';
 import { type FastifyPluginAsync, type FastifyServerOptions } from 'fastify';
 import { initDatabase } from '@/config/database';
+import { config } from '@/config';
 
 export interface AppOptions extends FastifyServerOptions, Partial<AutoloadPluginOptions> {}
 
 const options: AppOptions = {
-  trustProxy: true,
+  trustProxy: config.trustedProxies,
 };
 
 const app: FastifyPluginAsync<AppOptions> = async (fastify, opts): Promise<void> => {

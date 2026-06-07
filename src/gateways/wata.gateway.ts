@@ -80,7 +80,7 @@ export class WataGateway {
     }
   }
 
-  // Public key is cached per base URL for the process lifetime —
+  // Public key is cached per base URL for the process lifetime -
   // Wata rotates rarely; clearPublicKeyCache() lets tests / ops force a refresh.
   async fetchPublicKey(): Promise<string> {
     const cached = publicKeyCache.get(this.baseUrl);
@@ -92,7 +92,7 @@ export class WataGateway {
         responseType: 'text',
       });
 
-      // Endpoint may return raw PEM, or {"value":"<PEM>"} — handle both.
+      // Endpoint may return raw PEM, or {"value":"<PEM>"} - handle both.
       let pem: string | undefined;
       if (typeof data === 'string') {
         const trimmed = data.trim();
@@ -123,7 +123,7 @@ export class WataGateway {
     }
   }
 
-  // Verify against the EXACT bytes received — re-serialised JSON would
+  // Verify against the EXACT bytes received - re-serialised JSON would
   // produce a different signature (key order, spacing). Caller must pass the
   // raw body Fastify gave it, not a parsed-then-stringified copy.
   async verifyWebhookSignature(

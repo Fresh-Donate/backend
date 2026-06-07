@@ -15,14 +15,27 @@ const productBodySchema = {
     imageUrl: { type: 'string' as const, maxLength: 512 },
     allowCustomCount: { type: 'boolean' as const },
     forceDelivery: { type: 'boolean' as const },
+    serverIds: { type: 'array' as const, items: { type: 'string' as const, maxLength: 64 } },
   },
 };
 
 const productRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new ProductService();
 
-  fastify.get('/', async () => {
-    return service.findAll();
+  fastify.get('/', async (request, reply) => {
+    let includeHidden = false;
+    if (request.headers.authorization) {
+      try {
+        await request.jwtVerify();
+        includeHidden = true;
+      } catch {
+        // ignore - fall through to public view
+      }
+    }
+    if (!includeHidden) {
+      reply.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+    }
+    return service.findAll({ includeHidden });
   });
 
   fastify.get<{ Params: { id: string } }>('/:id', async (request) => {

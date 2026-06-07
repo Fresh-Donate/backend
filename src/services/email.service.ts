@@ -1,5 +1,6 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import { Payment } from '@/models/payment.model';
+import { PaymentItem } from '@/models/payment-item.model';
 import { Product } from '@/models/product.model';
 import { SettingsService } from './settings.service';
 import { ShopSettingsService } from './shop-settings.service';
@@ -10,6 +11,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   yookassa: 'ЮKassa',
   heleket: 'Heleket',
   wata: 'Wata',
+  robokassa: 'Robokassa',
   cryptobot: 'CryptoBot',
   tebex: 'Tebex',
 };
@@ -19,8 +21,9 @@ export const RECEIPT_PLACEHOLDERS: { key: string; description: string }[] = [
   { key: 'paymentIdShort', description: 'Короткий ID (первые 8 символов)' },
   { key: 'nickname', description: 'Никнейм покупателя' },
   { key: 'email', description: 'Email покупателя' },
-  { key: 'productName', description: 'Название товара' },
+  { key: 'productName', description: 'Название товара (для корзины - первый товар)' },
   { key: 'productId', description: 'ID товара' },
+  { key: 'itemsTable', description: 'Список всех товаров заказа (таблица)' },
   { key: 'quantity', description: 'Итоговое количество' },
   { key: 'userSelectedCount', description: 'Сколько штук выбрал покупатель' },
   { key: 'productPrice', description: 'Цена за единицу' },
@@ -44,7 +47,7 @@ function formatMoney(value: number): string {
 }
 
 function formatDate(value: Date | null | undefined): string {
-  if (!value) return '—';
+  if (!value) return '-';
   return new Intl.DateTimeFormat('ru-RU', {
     day: '2-digit',
     month: '2-digit',
@@ -53,6 +56,35 @@ function formatDate(value: Date | null | undefined): string {
     minute: '2-digit',
     timeZone: 'Europe/Moscow',
   }).format(value);
+}
+
+interface ReceiptLineItem {
+  productName: string;
+  userSelectedCount: number;
+  lineTotal: number;
+}
+
+// HTML rows for {itemsTable}. Product names are escaped here because this
+// string is injected AFTER the global escape pass (it is itself markup).
+function buildItemsTableHtml(items: ReceiptLineItem[], currency: string): string {
+  if (!items || items.length === 0) return '';
+  const cur = escapeHtml(currency);
+  const rows = items.map((it) => `
+          <tr>
+            <td style="padding:8px 0;border-bottom:1px solid #eef0f3;font-size:13px;">${escapeHtml(it.productName)} <span style="color:#6b7280;">× ${it.userSelectedCount}</span></td>
+            <td style="padding:8px 0;border-bottom:1px solid #eef0f3;font-size:13px;font-weight:600;text-align:right;white-space:nowrap;">${formatMoney(Number(it.lineTotal))} ${cur}</td>
+          </tr>`).join('');
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:8px 0;border-collapse:collapse;">${rows}
+        </table>`;
+}
+
+// Plain-text fallback used in the subject and as the seed for the text part
+// (the HTML one is converted via htmlToText, but the subject needs text too).
+function buildItemsTableText(items: ReceiptLineItem[], currency: string): string {
+  if (!items || items.length === 0) return '';
+  return items
+    .map((it) => `- ${it.productName} × ${it.userSelectedCount}: ${formatMoney(Number(it.lineTotal))} ${currency}`)
+    .join('\n');
 }
 
 function renderTemplate(template: string, vars: Record<string, string>): string {
@@ -82,8 +114,8 @@ function buildVars(payload: {
   const quantity = payment
     ? String((product?.quantity ?? payment.quantity ?? 1) * (payment.userSelectedCount || 1))
     : '1';
-  const providerId = payment?.providerId || '—';
-  const providerName = providerId === '—' ? '—' : (PROVIDER_NAMES[providerId] || providerId);
+  const providerId = payment?.providerId || '-';
+  const providerName = providerId === '-' ? '-' : (PROVIDER_NAMES[providerId] || providerId);
 
   return {
     paymentId: payment?.id || 'preview-payment-id',
@@ -91,7 +123,7 @@ function buildVars(payload: {
     nickname: payment?.customerNickname || 'Steve',
     email: payment?.customerEmail || 'buyer@example.com',
     productName,
-    productId: payment?.productId || product?.id || '—',
+    productId: payment?.productId || product?.id || '-',
     quantity,
     userSelectedCount: String(payment?.userSelectedCount || 1),
     productPrice: formatMoney(Number(payment?.productPrice ?? product?.price ?? 0)),
@@ -100,7 +132,7 @@ function buildVars(payload: {
     currency: payment?.currency || product?.currency || 'RUB',
     providerName,
     providerId,
-    externalPaymentId: payment?.externalPaymentId || '—',
+    externalPaymentId: payment?.externalPaymentId || '-',
     paidAt: formatDate(payment?.paidAt ?? new Date()),
     status: payment?.status || 'paid',
     shopName: shop.name || 'FreshDonate Shop',
@@ -193,6 +225,11 @@ export class EmailService {
 
     const product = await Product.findByPk(payment.productId);
     const shop = await this.shopSettingsService.get();
+    const items = await PaymentItem.findAll({
+      where: { paymentId: payment.id },
+      order: [['created_at', 'ASC']],
+    });
+    const itemCurrency = payment.productCurrency || payment.currency;
 
     const vars = buildVars({
       payment,
@@ -204,9 +241,13 @@ export class EmailService {
         contactEmail: shop.contactEmail,
       },
     });
+    vars.itemsTable = buildItemsTableText(items, itemCurrency);
+
+    const htmlVars = varsForHtml(vars);
+    htmlVars.itemsTable = buildItemsTableHtml(items, itemCurrency);
 
     const subject = renderTemplate(settings.receipt_template.subject, vars);
-    const html = renderTemplate(settings.receipt_template.html, varsForHtml(vars));
+    const html = renderTemplate(settings.receipt_template.html, htmlVars);
 
     try {
       await this.sendRendered(payment.customerEmail, subject, html, settings.smtp_config);
@@ -266,9 +307,13 @@ export class EmailService {
       },
       isPreview: true,
     });
+    vars.itemsTable = buildItemsTableText(SAMPLE_ITEMS, 'RUB');
+
+    const htmlVars = varsForHtml(vars);
+    htmlVars.itemsTable = buildItemsTableHtml(SAMPLE_ITEMS, 'RUB');
 
     const subject = `[ТЕСТ] ${renderTemplate(settings.receipt_template.subject, vars)}`;
-    const html = renderTemplate(settings.receipt_template.html, varsForHtml(vars));
+    const html = renderTemplate(settings.receipt_template.html, htmlVars);
 
     await this.sendRendered(to, subject, html, smtp);
   }
@@ -286,12 +331,24 @@ export class EmailService {
       },
       isPreview: true,
     });
+    vars.itemsTable = buildItemsTableText(SAMPLE_ITEMS, 'RUB');
+
+    const htmlVars = varsForHtml(vars);
+    htmlVars.itemsTable = buildItemsTableHtml(SAMPLE_ITEMS, 'RUB');
+
     return {
       subject: renderTemplate(template.subject, vars),
-      html: renderTemplate(template.html, varsForHtml(vars)),
+      html: renderTemplate(template.html, htmlVars),
     };
   }
 }
+
+// Two-line sample basket used by the test email and the receipt preview so
+// admins can see how {itemsTable} renders before going live.
+const SAMPLE_ITEMS: ReceiptLineItem[] = [
+  { productName: 'VIP привилегия', userSelectedCount: 1, lineTotal: 299 },
+  { productName: 'Алмазный меч', userSelectedCount: 2, lineTotal: 198 },
+];
 
 function varsForHtml(vars: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};

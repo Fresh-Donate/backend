@@ -19,7 +19,7 @@ const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   }, async (request) => {
     const { search, limit, offset, sortBy, sortOrder } = request.query;
 
-    // Whitelist sort params — protects against arbitrary SQL identifiers
+    // Whitelist sort params - protects against arbitrary SQL identifiers
     // sneaking into the ORDER clause via the literal() branch in the service.
     const allowedSortBy = ['nickname', 'email', 'createdAt', 'purchaseCount', 'totalSpent'] as const;
     type SortBy = typeof allowedSortBy[number];
@@ -38,7 +38,7 @@ const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     });
   });
 
-  // Customer key is the Minecraft nickname — there's no stored UUID anymore,
+  // Customer key is the Minecraft nickname - there's no stored UUID anymore,
   // customer data is aggregated from `payments` on the fly.
   fastify.get<{ Params: { nickname: string } }>('/:nickname', {
     onRequest: [fastify.authenticate],

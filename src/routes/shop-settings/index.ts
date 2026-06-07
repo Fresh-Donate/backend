@@ -5,7 +5,8 @@ import type { OwnerType } from '@/models/shop-settings.model';
 const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new ShopSettingsService();
 
-  fastify.get('/', async () => {
+  fastify.get('/', async (_req, reply) => {
+    reply.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
     return service.get();
   });
 
@@ -20,6 +21,7 @@ const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> =>
       ownerType?: OwnerType;
       ownerInn?: string;
       contactEmail?: string;
+      cartEnabled?: boolean;
     };
   }>('/', {
     onRequest: [fastify.authenticate],
@@ -36,6 +38,7 @@ const shopSettingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> =>
           ownerType: { type: 'string', enum: ['', 'individual', 'self_employed', 'sole_proprietor', 'legal_entity'] },
           ownerInn: { type: 'string', maxLength: 32 },
           contactEmail: { type: 'string', maxLength: 256 },
+          cartEnabled: { type: 'boolean' },
         },
       },
     },

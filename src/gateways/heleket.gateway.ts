@@ -78,7 +78,7 @@ export class HeleketGateway {
     }
   }
 
-  // Heleket signs webhooks with PHP json_encode, which escapes forward slashes —
+  // Heleket signs webhooks with PHP json_encode, which escapes forward slashes -
   // we must replicate that escape to match the signature.
   verifyWebhookSignature(payload: Record<string, any>): boolean {
     const { sign: receivedSign, ...data } = payload;

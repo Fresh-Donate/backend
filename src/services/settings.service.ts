@@ -5,6 +5,7 @@ import {
   DEFAULT_RECEIPT_TEMPLATE,
 } from '@/models/settings.model';
 import { PaymentProvider } from '@/models/payment-provider.model';
+import { ValidationError } from '@/core';
 import {
   SUPPORTED_CURRENCIES,
   DEFAULT_BASE_CURRENCY,
@@ -25,9 +26,6 @@ function generateInstallationId(): string {
   return crypto.randomUUID();
 }
 
-// Drop unsupported codes / non-positive numbers / the base currency itself.
-// Mirrors the panel's fixed RUB/USD/EUR allow-list — silently ignoring stale
-// keys keeps a partial PUT from a stale client from failing.
 function normalizeCurrencyRates(rates: CurrencyRates | undefined, base: SupportedCurrency): CurrencyRates | undefined {
   if (rates === undefined) return undefined;
   const out: CurrencyRates = {};
@@ -43,7 +41,7 @@ function normalizeCurrencyRates(rates: CurrencyRates | undefined, base: Supporte
 }
 
 // Always emit a populated rate map for the two non-base currencies so the
-// panel never has to decide what to render for an empty cell — missing
+// panel never has to decide what to render for an empty cell - missing
 // entries are filled with defaults.
 function fillRatesForBase(stored: CurrencyRates | null | undefined, base: SupportedCurrency): CurrencyRates {
   const raw = stored ?? {};
@@ -112,6 +110,7 @@ function toDto(s: Settings): SettingsDto {
     delivery_method: s.delivery_method,
     rcon_config: s.rcon_config,
     plugin_config: s.plugin_config,
+    multi_server_enabled: s.multi_server_enabled ?? false,
     base_currency: base,
     currency_rates: fillRatesForBase(s.currency_rates, base),
     telemetry_enabled: s.telemetry_enabled ?? true,
@@ -165,6 +164,17 @@ export class SettingsService {
 
     if (!settings.installation_id) {
       await settings.update({ installation_id: generateInstallationId() });
+    }
+
+    // Multi-server only works with the plugin delivery method (RCON has no
+    // per-server routing). Block toggling either knob into an inconsistent
+    // state - the panel mirrors this constraint, but enforce server-side too.
+    const currentMulti = settings.multi_server_enabled ?? false;
+    const nextMulti = data.multi_server_enabled ?? currentMulti;
+    const currentDelivery = settings.delivery_method;
+    const nextDelivery = data.delivery_method ?? currentDelivery;
+    if (nextMulti && nextDelivery !== 'plugin') {
+      throw new ValidationError('Multi-server requires delivery_method=plugin');
     }
 
     const currentBase: SupportedCurrency = isSupportedCurrency(settings.base_currency)

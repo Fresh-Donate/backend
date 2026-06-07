@@ -3,7 +3,7 @@ import { Payment } from '@/models/payment.model';
 
 // 30 min covers slow real-world checkouts (user opens provider page, then
 // goes to grab their card) without letting abandoned carts pile up. Late
-// `paid` webhooks past TTL are still honoured — see handle*Webhook branches
+// `paid` webhooks past TTL are still honoured - see handle*Webhook branches
 // in payment.service that accept both `pending` and `expired`.
 export const PAYMENT_TTL_MS = 30 * 60 * 1000;
 

@@ -14,6 +14,7 @@ const DEFAULTS = {
   ownerType: '' as OwnerType,
   ownerInn: '',
   contactEmail: '',
+  cartEnabled: false,
 };
 
 function normalizeShopUrl(url: string | undefined): string | undefined {
@@ -47,6 +48,7 @@ function toDto(
     ownerType: ((OWNER_TYPES as readonly string[]).includes(s.ownerType) ? s.ownerType : '') as OwnerType,
     ownerInn: s.ownerInn ?? '',
     contactEmail: s.contactEmail ?? '',
+    cartEnabled: s.cartEnabled ?? false,
     baseCurrency: currency.base_currency,
     currencyRates: currency.currency_rates,
   };

@@ -1,15 +1,15 @@
-# FreshDonate — Backend
+# FreshDonate - Backend
 
 > REST API и ядро платежей/доставки платформы FreshDonate.
 
-Часть проекта **FreshDonate** — open‑source платформы донатов для Minecraft‑серверов.
+Часть проекта **FreshDonate** - open‑source платформы донатов для Minecraft‑серверов.
 См. также: [Магазин](https://github.com/Fresh-Donate/shop) · [Админ‑панель](https://github.com/Fresh-Donate/panel) · [Minecraft‑плагин](https://github.com/Fresh-Donate/fresh-donate-plugin) · [English README](README.md)
 
 ---
 
 ## О проекте FreshDonate
 
-FreshDonate — самохостимая система приёма донатов для Minecraft‑серверов. Она позволяет продавать привилегии, предметы, валюту и любые другие внутриигровые товары через собственную витрину, принимать оплату через несколько платёжных систем и автоматически доставлять покупки игрокам при следующем заходе на сервер — без комиссий сторонних сервисов и без вендор‑лока.
+FreshDonate - самохостимая система приёма донатов для Minecraft‑серверов. Она позволяет продавать привилегии, предметы, валюту и любые другие внутриигровые товары через собственную витрину, принимать оплату через несколько платёжных систем и автоматически доставлять покупки игрокам при следующем заходе на сервер - без комиссий сторонних сервисов и без вендор‑лока.
 
 Платформа разделена на четыре репозитория:
 
@@ -22,10 +22,10 @@ FreshDonate — самохостимая система приёма донат�
 
 ## Роль этого репозитория
 
-Бекенд — единый источник правды по товарам, платежам и клиентам. Он:
+Бекенд - единый источник правды по товарам, платежам и клиентам. Он:
 
 - отдаёт REST API, который используют магазин и админка;
-- создаёт платежи во внешних шлюзах (YooKassa, Heleket, Wata, Tebex, CryptoBot) и обрабатывает их вебхуки;
+- создаёт платежи во внешних шлюзах (YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot) и обрабатывает их вебхуки;
 - хранит отложенные доставки и передаёт их плагину при заходе игрока;
 - умеет доставлять покупки через RCON, если плагин не установлен;
 - выдаёт JWT для админки и ограничивает публичные ручки через rate‑limit.
@@ -49,7 +49,7 @@ FreshDonate — самохостимая система приёма донат�
 ## Быстрый старт (dev)
 
 ```bash
-cp .env.example .env    # если файла нет — см. раздел "Конфигурация" ниже
+cp .env.example .env    # если файла нет - см. раздел "Конфигурация" ниже
 npm install
 npm run dev
 ```
@@ -94,7 +94,7 @@ docker compose up -d --build
 src/
   config/      env и инициализация sequelize
   core/        базовые repository/service/controller, общие ошибки
-  gateways/    HTTP‑клиенты для YooKassa, Heleket, Wata, Tebex, CryptoBot
+  gateways/    HTTP‑клиенты для YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot
   models/      модели Sequelize
   plugins/     плагины Fastify (jwt, cors, redis, rate-limit, error-handler)
   routes/      auth, products, payments, customers, stats, webhooks, plugin
@@ -114,9 +114,9 @@ test/          тесты на node:test (unit + route‑level)
 
 ## Связанные репозитории
 
-- [fresh-donate-shop](https://github.com/Fresh-Donate/shop) — публичная витрина
-- [fresh-donate-panel](https://github.com/Fresh-Donate/panel) — админ‑панель
-- [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) — плагин доставки для Minecraft
+- [fresh-donate-shop](https://github.com/Fresh-Donate/shop) - публичная витрина
+- [fresh-donate-panel](https://github.com/Fresh-Donate/panel) - админ‑панель
+- [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) - плагин доставки для Minecraft
 
 ## Лицензия
 

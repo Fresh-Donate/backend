@@ -29,4 +29,4 @@ VOLUME ["/app/uploads"]
 
 EXPOSE 3001
 
-CMD ["node", "node_modules/.bin/fastify", "start", "-l", "info", "-a", "0.0.0.0", "dist/app.js"]
+CMD ["node", "node_modules/.bin/fastify", "start", "--options", "-l", "info", "-a", "0.0.0.0", "dist/app.js"]

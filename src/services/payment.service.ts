@@ -1,9 +1,13 @@
+import { createHash } from 'node:crypto';
 import { Payment, type PaymentStatus } from '@/models/payment.model';
+import { PaymentItem } from '@/models/payment-item.model';
 import { Product } from '@/models/product.model';
 import { Promotion } from '@/models/promotion.model';
 import { Group } from '@/models/group.model';
+import { Server } from '@/models/server.model';
 import { PaymentOption } from '@/models/payment-option.model';
 import { PaymentProvider } from '@/models/payment-provider.model';
+import { ShopSettingsService } from './shop-settings.service';
 import { CustomerService } from './customer.service';
 import { SettingsService } from './settings.service';
 import { DeliveryService } from './delivery.service';
@@ -16,26 +20,60 @@ import {
   totalDiscountPercent,
 } from './promotion.service';
 import { NotFoundError, ValidationError, PaymentError } from '@/core';
-import { Op, fn, col, literal } from 'sequelize';
+import { Op, fn, col, literal, QueryTypes } from 'sequelize';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
 import { TebexGateway } from '@/gateways/tebex.gateway';
 import { CryptoBotGateway } from '@/gateways/cryptobot.gateway';
+import { RobokassaGateway } from '@/gateways/robokassa.gateway';
 import { config } from '@/config';
 import { buildAmountInTargetSql, convert, toBaseCurrency, isSupportedCurrency } from '@/utils/currency';
 import type {
   PaymentDto,
+  PaymentItemDto,
   CreatePaymentDto,
+  CreateCartDto,
+  CartItemInput,
+  CartPreviewDto,
+  CartPreviewItem,
   UpgradeEvaluation,
   WataWebhookPayload,
+  RobokassaWebhookPayload,
+  RobokassaHashAlgorithm,
   TebexWebhookEnvelope,
   CryptoBotWebhookUpdate,
   CryptoBotFiat,
   StatsSummary,
 } from '@/types';
 
-function toDto(p: Payment): PaymentDto {
+function toItemDto(i: PaymentItem): PaymentItemDto {
+  return {
+    id: i.id,
+    productId: i.productId,
+    productName: i.productName,
+    productPrice: Number(i.productPrice),
+    productCurrency: i.productCurrency,
+    quantity: i.quantity,
+    userSelectedCount: i.userSelectedCount,
+    lineTotal: Number(i.lineTotal),
+    discountPercent: Number(i.discountPercent),
+    upgradeDiscount: Number(i.upgradeDiscount),
+  };
+}
+
+function sortPaymentItems(p: Payment): void {
+  const items = p.items as PaymentItem[] | undefined;
+  if (!items || items.length < 2) return;
+  items.sort((a, b) => {
+    const ta = a.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a.createdAt).getTime();
+    const tb = b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime();
+    return ta - tb;
+  });
+}
+
+function toDto(p: Payment, items?: PaymentItem[]): PaymentDto {
+  const itemRows = items ?? (p.items as PaymentItem[] | undefined);
   return {
     id: p.id,
     customerNickname: p.customerNickname,
@@ -61,16 +99,54 @@ function toDto(p: Payment): PaymentDto {
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
     userSelectedCount: p.userSelectedCount,
+    itemsCount: p.itemsCount,
+    items: itemRows ? itemRows.map(toItemDto) : undefined,
   };
 }
 
-// Idempotency cache: same (nickname, product, count) request within 2 min
-// returns the existing pending payment instead of double-charging.
+// Idempotency cache: the same checkout (same buyer + same basket) repeated
+// within 2 min returns the existing pending payment instead of double-charging.
 const paymentCache = new Map<string, { paymentId: string; expiresAt: number }>();
 const CACHE_TTL = 2 * 60 * 1000;
 
-function getCacheKey(nickname: string, productKey: string): string {
-  return `${nickname}:${productKey}`;
+// Stable key for a basket: nickname + sorted (productId, count) pairs. Single
+// purchases are just a one-line basket, so they share the same scheme.
+function getCartCacheKey(nickname: string, items: { productId: string; count: number }[]): string {
+  const normalized = [...items]
+    .map((i) => `${i.productId}_${i.count}`)
+    .sort()
+    .join('|');
+  const hash = createHash('sha1').update(normalized).digest('hex');
+  return `${nickname}:${hash}`;
+}
+
+// Webhooks/confirm clear the idempotency entry by the key we stashed at
+// creation, so a finalized payment never shadows a fresh retry.
+function clearPaymentCache(payment: Payment): void {
+  const key = payment.meta?.cacheKey;
+  if (typeof key === 'string' && key) {
+    paymentCache.delete(key);
+  }
+}
+
+const MAX_CART_ITEMS = 20;
+
+interface ResolvedItem {
+  product: Product;
+  count: number;
+  unitPrice: number; // final per-unit price (promo + upgrade), product currency
+  discountPercent: number; // stacked promo percent
+  upgradeDiscount: number; // per-unit upgrade discount applied
+  lineTotal: number; // unitPrice * count, product currency
+}
+
+// Russian plural for "N товаров" used in the external-payment description.
+function ruItemsCount(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} товар`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${n} товара`;
+  return `${n} товаров`;
 }
 
 export class PaymentService {
@@ -80,6 +156,7 @@ export class PaymentService {
   private emailService = new EmailService();
   private expirationService = new PaymentExpirationService();
   private upgradePricingService = new UpgradePricingService();
+  private shopSettingsService = new ShopSettingsService();
 
   // Single fan-out point for "payment just transitioned to paid": fire the
   // receipt email (best-effort, never blocks) and then kick off delivery.
@@ -93,48 +170,295 @@ export class PaymentService {
     return this.upgradePricingService.evaluate(nickname, productId);
   }
 
+  // Whole-basket pricing for the checkout screen: per-line promo + upgrade
+  // evaluation, currency-mixing detection and same-upgrade-group conflict
+  // detection. Mirrors what createOrder will charge, so the UI can disable the
+  // pay button before the user is ever charged.
+  async previewCart(nickname: string, inputs: CartItemInput[]): Promise<CartPreviewDto> {
+    const countByProduct = new Map<string, number>();
+    const order: string[] = [];
+    for (const input of inputs) {
+      if (!input?.productId) continue;
+      if (!countByProduct.has(input.productId)) order.push(input.productId);
+      const prev = countByProduct.get(input.productId) || 0;
+      countByProduct.set(input.productId, prev + Math.max(1, Math.floor(Number(input.count) || 1)));
+    }
+
+    const products = order.length > 0
+      ? await Product.findAll({
+        where: { id: { [Op.in]: order } },
+        include: [
+          { model: Promotion, through: { attributes: [] }, required: false },
+          { model: Group, through: { attributes: [] }, required: false },
+        ],
+      })
+      : [];
+    const productById = new Map(products.map((p) => [p.id, p]));
+
+    const items: CartPreviewItem[] = [];
+    const upgradeGroupOwners = new Map<string, number>(); // groupId -> item index
+    let currency: string | null = null;
+    let currencyMismatch = false;
+
+    for (const productId of order) {
+      const product = productById.get(productId);
+      if (!product) continue; // dropped silently; create() will hard-fail
+
+      if (currency === null) currency = product.currency;
+      else if (product.currency !== currency) currencyMismatch = true;
+
+      const requestedCount = countByProduct.get(productId) || 1;
+      const isPrivilege = product.type === 'privilege';
+      const count = isPrivilege ? 1 : product.allowCustomCount ? Math.max(1, requestedCount) : 1;
+
+      const stackedPercent = totalDiscountPercent(activePromotionsAt(product.promotions));
+      const unitOriginalPrice = Number(product.price);
+      const discountedUnit = applyDiscount(unitOriginalPrice, stackedPercent);
+
+      const upgradeEval = await this.upgradePricingService.evaluate(nickname, product.id);
+      const upgradeDiscount = upgradeEval.upgradeDiscount > 0 ? upgradeEval.upgradeDiscount : 0;
+      const unitPrice = upgradeEval.blocked
+        ? discountedUnit
+        : upgradeDiscount > 0
+          ? Math.max(0, Math.round((discountedUnit - upgradeDiscount) * 100) / 100)
+          : discountedUnit;
+      const lineTotal = Math.round(unitPrice * count * 100) / 100;
+
+      const index = items.length;
+      let groupConflict = false;
+      for (const group of product.groups || []) {
+        if (!group.upgradeMode) continue;
+        if (upgradeGroupOwners.has(group.id)) {
+          groupConflict = true;
+          const ownerIdx = upgradeGroupOwners.get(group.id)!;
+          if (items[ownerIdx]) items[ownerIdx]!.groupConflict = true;
+        } else {
+          upgradeGroupOwners.set(group.id, index);
+        }
+      }
+
+      items.push({
+        productId: product.id,
+        productName: product.name,
+        count,
+        unitPrice,
+        unitOriginalPrice,
+        lineTotal,
+        discountPercent: stackedPercent,
+        upgradeDiscount,
+        blocked: upgradeEval.blocked,
+        blockedReference: upgradeEval.reference
+          ? { productName: upgradeEval.reference.productName, referencePrice: upgradeEval.reference.referencePrice }
+          : undefined,
+        groupConflict,
+      });
+    }
+
+    const total = Math.round(items.reduce((sum, i) => sum + i.lineTotal, 0) * 100) / 100;
+    const blockedCount = items.filter((i) => i.blocked || i.groupConflict).length;
+
+    return {
+      currency: currency || 'RUB',
+      items,
+      total,
+      blockedCount,
+      currencyMismatch,
+    };
+  }
+
+  // Single-product checkout. Kept as a thin wrapper over the shared order
+  // builder so the legacy `POST /payments` route and the new cart route never
+  // drift apart on pricing, commission or delivery.
   async create(data: CreatePaymentDto): Promise<PaymentDto> {
-    const product = await Product.findByPk(data.productId, {
+    return this.createOrder(
+      [{ productId: data.productId, count: data.count }],
+      {
+        nickname: data.nickname,
+        email: data.email,
+        paymentOptionId: data.paymentOptionId,
+        customerIp: data.customerIp,
+      },
+      { isCart: false },
+    );
+  }
+
+  // Multi-product checkout - one external charge for the whole basket. Only
+  // reachable when the admin enabled the cart in shop settings.
+  async createCart(data: CreateCartDto): Promise<PaymentDto> {
+    const shop = await this.shopSettingsService.get();
+    if (!shop.cartEnabled) {
+      throw new ValidationError('Корзина отключена в настройках магазина.');
+    }
+    if (!Array.isArray(data.items) || data.items.length === 0) {
+      throw new ValidationError('Корзина пуста.');
+    }
+    if (data.items.length > MAX_CART_ITEMS) {
+      throw new ValidationError(`В корзине не больше ${MAX_CART_ITEMS} товаров.`);
+    }
+    return this.createOrder(
+      data.items,
+      {
+        nickname: data.nickname,
+        email: data.email,
+        paymentOptionId: data.paymentOptionId,
+        customerIp: data.customerIp,
+      },
+      { isCart: true },
+    );
+  }
+
+  private async createOrder(
+    inputs: CartItemInput[],
+    buyer: { nickname: string; email: string; paymentOptionId: string; customerIp?: string },
+    opts: { isCart: boolean },
+  ): Promise<PaymentDto> {
+    // Merge duplicate lines defensively (UI keys by productId, but a crafted
+    // request could repeat one) and resolve to a stable ordered list.
+    const countByProduct = new Map<string, number>();
+    const order: string[] = [];
+    for (const input of inputs) {
+      if (!input?.productId) continue;
+      if (!countByProduct.has(input.productId)) order.push(input.productId);
+      const prev = countByProduct.get(input.productId) || 0;
+      countByProduct.set(input.productId, prev + Math.max(1, Math.floor(Number(input.count) || 1)));
+    }
+    if (order.length === 0) {
+      throw new ValidationError('Корзина пуста.');
+    }
+
+    const products = await Product.findAll({
+      where: { id: { [Op.in]: order } },
       include: [
         { model: Promotion, through: { attributes: [] }, required: false },
         { model: Group, through: { attributes: [] }, required: false },
+        { model: Server, through: { attributes: [] }, required: false },
       ],
     });
-    if (!product) {
-      throw new NotFoundError('Product not found');
+    const productById = new Map(products.map((p) => [p.id, p]));
+
+    const settings = await this.settingsService.get();
+    const enforceServerBinding = opts.isCart
+      && settings.delivery_method === 'plugin'
+      && settings.multi_server_enabled;
+
+    // Per-item resolution: count rules, currency unification, upgrade pricing.
+    const resolved: ResolvedItem[] = [];
+    const blocked: { productName: string; referenceName?: string }[] = [];
+    const upgradeGroupOwners = new Map<string, string>(); // groupId -> productName
+    let orderCurrency: string | null = null;
+
+    for (const productId of order) {
+      const product = productById.get(productId);
+      if (!product) {
+        throw opts.isCart
+          ? new ValidationError('Один из товаров в корзине больше недоступен. Обновите корзину.')
+          : new NotFoundError('Product not found');
+      }
+
+      const requestedCount = countByProduct.get(productId) || 1;
+      const isPrivilege = product.type === 'privilege';
+      const count = isPrivilege
+        ? 1
+        : product.allowCustomCount
+          ? Math.max(1, Math.floor(requestedCount))
+          : 1;
+
+      if (!product.allowCustomCount && !isPrivilege && count !== 1) {
+        throw new ValidationError('This product does not support custom count');
+      }
+
+      // Single currency per order - the basket UI prevents mixing, but the
+      // server is the authority.
+      if (orderCurrency === null) {
+        orderCurrency = product.currency;
+      } else if (product.currency !== orderCurrency) {
+        throw new ValidationError('Все товары в корзине должны быть в одной валюте.');
+      }
+
+      if (enforceServerBinding && (product.servers || []).length === 0) {
+        throw new ValidationError(
+          `Товар "${product.name}" не привязан ни к одному серверу - его нельзя купить.`,
+        );
+      }
+
+      // Upgrade groups can't be auto-resolved within a single basket, so two
+      // items from the same upgrade group are rejected up front.
+      for (const group of product.groups || []) {
+        if (!group.upgradeMode) continue;
+        const owner = upgradeGroupOwners.get(group.id);
+        if (owner) {
+          throw new ValidationError(
+            `Нельзя купить «${owner}» и «${product.name}» вместе - это товары одной апгрейд-группы.`,
+          );
+        }
+        upgradeGroupOwners.set(group.id, product.name);
+      }
+
+      // Pricing order: promo → upgrade "доплата" → multiply by count. Same
+      // evaluator as /preview, so what the modal showed is what we charge.
+      const upgradeEval = await this.upgradePricingService.evaluate(buyer.nickname, product.id);
+      if (upgradeEval.blocked) {
+        blocked.push({ productName: product.name, referenceName: upgradeEval.reference?.productName });
+        continue;
+      }
+
+      const stackedPercent = totalDiscountPercent(activePromotionsAt(product.promotions));
+      const discountedUnit = applyDiscount(Number(product.price), stackedPercent);
+      const upgradeDiscount = upgradeEval.upgradeDiscount > 0 ? upgradeEval.upgradeDiscount : 0;
+      const finalUnit = upgradeDiscount > 0
+        ? Math.max(0, Math.round((discountedUnit - upgradeDiscount) * 100) / 100)
+        : discountedUnit;
+      const lineTotal = Math.round(finalUnit * count * 100) / 100;
+
+      resolved.push({
+        product,
+        count,
+        unitPrice: finalUnit,
+        discountPercent: stackedPercent,
+        upgradeDiscount,
+        lineTotal,
+      });
     }
 
-    // Privilege products are rank-style — count is always 1, ignoring whatever
-    // the client sent. Other products honour custom-count when allowed.
-    const isPrivilege = product.type === 'privilege';
-    const count = isPrivilege
-      ? 1
-      : product.allowCustomCount
-        ? Math.max(1, Math.floor(Number(data.count) || 1))
-        : 1;
-
-    if (!product.allowCustomCount && !isPrivilege && count !== 1) {
-      throw new ValidationError('This product does not support custom count');
+    if (blocked.length > 0) {
+      const first = blocked[0];
+      if (!opts.isCart) {
+        throw new ValidationError(
+          first.referenceName
+            ? `Этот товар нельзя купить - на нике "${buyer.nickname}" уже есть "${first.referenceName}" из этой группы.`
+            : 'Этот товар уже куплен на указанном нике.',
+        );
+      }
+      const names = blocked.map((b) => `«${b.productName}»`).join(', ');
+      throw new ValidationError(
+        `Эти товары нельзя купить на нике "${buyer.nickname}" - уберите их из корзины: ${names}.`,
+      );
     }
 
-    const cacheKey = getCacheKey(data.nickname, `${data.productId}_${count}`);
+    const productCurrency = orderCurrency || 'RUB';
+    const productPrice = Math.round(
+      resolved.reduce((sum, r) => sum + r.lineTotal, 0) * 100,
+    ) / 100;
+
+    const cacheKey = getCartCacheKey(
+      buyer.nickname,
+      resolved.map((r) => ({ productId: r.product.id, count: r.count })),
+    );
     const cached = paymentCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
-      const existing = await Payment.findByPk(cached.paymentId);
+      const existing = await this.findDtoById(cached.paymentId);
       if (existing && existing.status === 'pending') {
-        return toDto(existing);
+        return existing;
       }
       paymentCache.delete(cacheKey);
     }
 
-    const option = await PaymentOption.findByPk(data.paymentOptionId);
+    const option = await PaymentOption.findByPk(buyer.paymentOptionId);
     if (!option) {
       throw new ValidationError('Payment option not found');
     }
 
     const provider = await PaymentProvider.findOne({ where: { providerId: option.providerId } });
-
-    const settings = await this.settingsService.get();
     if (!settings.demo_payments) {
       if (!provider) {
         throw new ValidationError(`Payment provider "${option.providerId}" not found`);
@@ -147,27 +471,7 @@ export class PaymentService {
       }
     }
 
-    // Pricing order: promo → upgrade "доплата" → multiply by count. Same
-    // evaluator as /preview, so what the modal showed is what we charge.
-    const upgradeEval = await this.upgradePricingService.evaluate(data.nickname, product.id);
-    if (upgradeEval.blocked) {
-      throw new ValidationError(
-        upgradeEval.reference
-          ? `Этот товар нельзя купить — на нике "${data.nickname}" уже есть "${upgradeEval.reference.productName}" из этой группы.`
-          : 'Этот товар уже куплен на указанном нике.',
-      );
-    }
-
-    const activePromos = activePromotionsAt(product.promotions);
-    const stackedPercent = totalDiscountPercent(activePromos);
-    const discountedUnit = applyDiscount(Number(product.price), stackedPercent);
-    const finalUnit = upgradeEval.upgradeDiscount > 0
-      ? Math.max(0, Math.round((discountedUnit - upgradeEval.upgradeDiscount) * 100) / 100)
-      : discountedUnit;
-    const productPrice = Math.round(finalUnit * count * 100) / 100;
-    const productCurrency = product.currency;
     let paymentCurrency = productCurrency;
-    let chargedPrice = productPrice;
     let commissionPercent = 0;
     let commissionAmount = 0;
     let totalAmount = productPrice;
@@ -180,7 +484,7 @@ export class PaymentService {
           : provider.supportedCurrencies[0];
       }
 
-      chargedPrice = paymentCurrency === productCurrency
+      const chargedPrice = paymentCurrency === productCurrency
         ? productPrice
         : Math.round(
           convert(productPrice, productCurrency, paymentCurrency, settings.currency_rates, settings.base_currency) * 100,
@@ -196,7 +500,7 @@ export class PaymentService {
         );
         if (chargedInBase + 1e-9 < minAmount) {
           throw new ValidationError(
-            `Минимальная сумма для оплаты через ${provider.name} — ${minAmount} ${settings.base_currency}.`,
+            `Минимальная сумма для оплаты через ${provider.name} - ${minAmount} ${settings.base_currency}.`,
           );
         }
       }
@@ -218,36 +522,62 @@ export class PaymentService {
       }
     }
 
-    const payment = await Payment.create({
-      customerNickname: data.nickname,
-      customerEmail: data.email,
-      productId: product.id,
-      productName: product.name,
-      productPrice,
-      productCurrency,
-      currency: paymentCurrency,
-      quantity: product.quantity,
-      totalAmount,
-      commissionPercent,
-      commissionAmount,
-      providerAmount,
-      paymentOptionId: data.paymentOptionId,
-      status: 'pending',
-      userSelectedCount: count,
+    const first = resolved[0]!;
+    const sequelize = Payment.sequelize!;
+    const payment = await sequelize.transaction(async (t) => {
+      const created = await Payment.create({
+        customerNickname: buyer.nickname,
+        customerEmail: buyer.email,
+        // Denormalized "first item" keeps the legacy single-product columns
+        // populated; readers that don't know about carts still see a sane row.
+        productId: first.product.id,
+        productName: first.product.name,
+        productPrice,
+        productCurrency,
+        currency: paymentCurrency,
+        quantity: first.product.quantity,
+        totalAmount,
+        commissionPercent,
+        commissionAmount,
+        providerAmount,
+        paymentOptionId: buyer.paymentOptionId,
+        status: 'pending',
+        userSelectedCount: first.count,
+        itemsCount: resolved.length,
+        meta: { cacheKey },
+      }, { transaction: t });
+
+      await PaymentItem.bulkCreate(
+        resolved.map((r) => ({
+          paymentId: created.id,
+          productId: r.product.id,
+          productName: r.product.name,
+          productPrice: r.unitPrice,
+          productCurrency,
+          quantity: r.product.quantity,
+          userSelectedCount: r.count,
+          lineTotal: r.lineTotal,
+          discountPercent: r.discountPercent,
+          upgradeDiscount: r.upgradeDiscount,
+        })),
+        { transaction: t },
+      );
+
+      return created;
     });
 
     if (settings.demo_payments) {
       await payment.update({
         status: 'paid',
         paidAt: new Date(),
-        meta: { demo: true },
+        meta: { ...payment.meta, demo: true },
       });
 
       await this.onPaymentPaid(payment.id);
 
-      const result = await Payment.findByPk(payment.id);
+      const result = await this.findDtoById(payment.id);
       if (!result) throw new Error('Payment vanished after creation');
-      return toDto(result);
+      return result;
     }
 
     paymentCache.set(cacheKey, {
@@ -256,12 +586,24 @@ export class PaymentService {
     });
 
     if (provider && provider.enabled) {
-      await this.createExternalPayment(payment, provider, product.name, data.customerIp);
+      const orderLabel = opts.isCart
+        ? `Заказ #${payment.id.slice(0, 8)} (${ruItemsCount(resolved.length)})`
+        : first.product.name;
+      await this.createExternalPayment(payment, provider, orderLabel, buyer.customerIp);
     }
 
-    const result = await Payment.findByPk(payment.id);
+    const result = await this.findDtoById(payment.id);
     if (!result) throw new Error('Payment vanished after creation');
-    return toDto(result);
+    return result;
+  }
+
+  private async findDtoById(id: string): Promise<PaymentDto | null> {
+    const payment = await Payment.findByPk(id, {
+      include: [{ model: PaymentItem, required: false }],
+    });
+    if (!payment) return null;
+    sortPaymentItems(payment);
+    return toDto(payment);
   }
 
   private async createExternalPayment(
@@ -285,7 +627,7 @@ export class PaymentService {
       const yooPayment = await gateway.createPayment({
         amount: Number(payment.totalAmount),
         currency: payment.currency,
-        description: `${productName} — FreshDonate`,
+        description: `${productName} - FreshDonate`,
         returnUrl: `${returnUrl}?paymentId=${payment.id}`,
         metadata: {
           payment_id: payment.id,
@@ -343,7 +685,7 @@ export class PaymentService {
         amount: Number(payment.totalAmount),
         currency,
         orderId: payment.id,
-        description: `${productName} — FreshDonate`,
+        description: `${productName} - FreshDonate`,
         successRedirectUrl: `${returnUrl}?paymentId=${payment.id}`,
         failRedirectUrl: `${returnUrl}?paymentId=${payment.id}&failed=1`,
       });
@@ -373,7 +715,7 @@ export class PaymentService {
         currencyType: 'fiat',
         fiat: payment.currency as CryptoBotFiat,
         amount: Number(payment.totalAmount),
-        description: `${productName} — FreshDonate`,
+        description: `${productName} - FreshDonate`,
         payload: payment.id,
         paidBtnName: 'callback',
         paidBtnUrl: `${returnUrl}?paymentId=${payment.id}`,
@@ -395,6 +737,46 @@ export class PaymentService {
         meta: {
           ...payment.meta,
           cryptobot: { testMode: provider.testMode, hash: invoice.hash },
+        },
+      });
+    } else if (provider.providerId === 'robokassa') {
+      const { merchantLogin, password1, password2 } = provider.credentials;
+      if (!merchantLogin || !password1 || !password2) {
+        throw new PaymentError(
+          'Robokassa credentials not configured. Set merchantLogin, password1 and password2 in payment provider settings.',
+          'ROBOKASSA_NOT_CONFIGURED',
+        );
+      }
+
+      const hashAlgorithm = ((provider.providerConfig?.hashAlgorithm as RobokassaHashAlgorithm) || 'sha256');
+      const gateway = new RobokassaGateway(
+        merchantLogin,
+        password1,
+        password2,
+        provider.testMode,
+        hashAlgorithm,
+      );
+
+      const invId = RobokassaGateway.makeInvId(payment.id);
+      const link = gateway.createPaymentLink({
+        amount: Number(payment.totalAmount),
+        invId,
+        description: `${productName} - FreshDonate`,
+        email: payment.customerEmail || undefined,
+        userParams: { paymentId: payment.id },
+      });
+
+      await payment.update({
+        providerId: provider.providerId,
+        externalPaymentId: String(link.invId),
+        externalPaymentUrl: link.url,
+        meta: {
+          ...payment.meta,
+          robokassa: {
+            invId: link.invId,
+            testMode: provider.testMode,
+            hashAlgorithm,
+          },
         },
       });
     } else if (provider.providerId === 'tebex') {
@@ -464,7 +846,7 @@ export class PaymentService {
 
       await payment.update(updateData);
       await this.onPaymentPaid(payment.id);
-      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+      clearPaymentCache(payment);
 
       console.log(`YooKassa: payment ${payment.id} succeeded (external: ${externalId})`);
     } else if (event === 'payment.canceled' && payment.status === 'pending') {
@@ -477,7 +859,7 @@ export class PaymentService {
         },
       });
 
-      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+      clearPaymentCache(payment);
 
       console.log(`YooKassa: payment ${payment.id} canceled (external: ${externalId})`);
     } else if (event === 'payment.waiting_for_capture' && payment.status === 'pending') {
@@ -544,7 +926,7 @@ export class PaymentService {
 
       await payment.update(updateData);
       await this.onPaymentPaid(payment.id);
-      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+      clearPaymentCache(payment);
 
       console.log(`Heleket: payment ${payment.id} succeeded (uuid: ${payload.uuid}, txid: ${payload.txid})`);
 
@@ -561,7 +943,7 @@ export class PaymentService {
         },
       });
 
-      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+      clearPaymentCache(payment);
 
       console.log(`Heleket: payment ${payment.id} failed with status ${status} (uuid: ${payload.uuid})`);
     }
@@ -617,7 +999,7 @@ export class PaymentService {
 
     await payment.update(updateData);
     await this.onPaymentPaid(payment.id);
-    paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+    clearPaymentCache(payment);
 
     console.log(
       `CryptoBot: payment ${payment.id} succeeded (invoice: ${invoice.invoice_id}, asset: ${invoice.paid_asset})`,
@@ -625,7 +1007,7 @@ export class PaymentService {
   }
 
   async handleWataWebhook(payload: WataWebhookPayload): Promise<void> {
-    // Wata pre-payment notifications may arrive without a transactionStatus —
+    // Wata pre-payment notifications may arrive without a transactionStatus -
     // safe to ignore until the post-payment one lands.
     const status = payload.transactionStatus || payload.status;
     if (!status) {
@@ -657,7 +1039,7 @@ export class PaymentService {
     if (status === 'Paid' && (payment.status === 'pending' || payment.status === 'expired')) {
       const paidAmount = payload.amount !== undefined ? Number(payload.amount) : Number(payment.totalAmount);
 
-      // Wata webhooks don't carry commission — keep our pre-charge estimate.
+      // Wata webhooks don't carry commission - keep our pre-charge estimate.
       await payment.update({
         status: 'paid',
         paidAt: payload.paymentTime ? new Date(payload.paymentTime) : new Date(),
@@ -675,7 +1057,7 @@ export class PaymentService {
       });
 
       await this.onPaymentPaid(payment.id);
-      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+      clearPaymentCache(payment);
 
       console.log(`Wata: payment ${payment.id} succeeded (tx: ${payload.transactionId})`);
     } else if (status === 'Declined' && payment.status === 'pending') {
@@ -693,10 +1075,80 @@ export class PaymentService {
         },
       });
 
-      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+      clearPaymentCache(payment);
 
       console.log(`Wata: payment ${payment.id} declined (${payload.errorCode || 'unknown'})`);
     }
+  }
+
+  // Robokassa ResultURL: form-urlencoded body. We resolve the payment by
+  // Shp_paymentId (our UUID) first, then fall back to InvId stored in
+  // externalPaymentId. Returns true on success - caller responds with
+  // `OK<InvId>` so Robokassa stops retrying.
+  async handleRobokassaWebhook(payload: RobokassaWebhookPayload): Promise<boolean> {
+    if (!payload.OutSum || !payload.InvId) return false;
+
+    let payment: Payment | null = null;
+
+    const shpPaymentId = payload.Shp_paymentId;
+    if (typeof shpPaymentId === 'string' && shpPaymentId) {
+      payment = await Payment.findByPk(shpPaymentId);
+    }
+
+    if (!payment) {
+      payment = await Payment.findOne({
+        where: {
+          providerId: 'robokassa',
+          externalPaymentId: payload.InvId,
+        },
+      });
+    }
+
+    if (!payment) {
+      console.warn(
+        `Robokassa webhook: payment not found (InvId=${payload.InvId} shpPaymentId=${shpPaymentId})`,
+      );
+      return false;
+    }
+
+    if (payment.status !== 'pending' && payment.status !== 'expired') {
+      return true;
+    }
+
+    const paidAmount = Number(payload.OutSum);
+    const fee = payload.Fee !== undefined ? Number(payload.Fee) : undefined;
+
+    const updateData: Record<string, any> = {
+      status: 'paid',
+      paidAt: new Date(),
+      totalAmount: Number.isFinite(paidAmount) ? paidAmount : Number(payment.totalAmount),
+    };
+
+    if (fee !== undefined && Number.isFinite(fee)) {
+      updateData.commissionAmount = fee;
+      updateData.providerAmount = Math.round((paidAmount - fee) * 100) / 100;
+      updateData.commissionPercent = paidAmount > 0
+        ? Math.round((fee / paidAmount) * 10000) / 100
+        : 0;
+    }
+
+    updateData.meta = {
+      ...payment.meta,
+      robokassa: {
+        ...(payment.meta.robokassa || {}),
+        invId: payload.InvId,
+        paymentMethod: payload.PaymentMethod,
+        incCurrLabel: payload.IncCurrLabel,
+        email: payload.EMail,
+      },
+    };
+
+    await payment.update(updateData);
+    await this.onPaymentPaid(payment.id);
+    clearPaymentCache(payment);
+
+    console.log(`Robokassa: payment ${payment.id} succeeded (InvId: ${payload.InvId})`);
+    return true;
   }
 
   // Tebex webhooks are wrapped as { id, type, date, subject }. We key off
@@ -707,7 +1159,7 @@ export class PaymentService {
     const { type, subject } = envelope;
 
     // Tebex sends `validation.webhook` once when a new endpoint is added in
-    // their panel — no subject, nothing to process, just ack it.
+    // their panel - no subject, nothing to process, just ack it.
     if (type === 'validation.webhook' || !subject) {
       return;
     }
@@ -762,7 +1214,7 @@ export class PaymentService {
 
       await payment.update(updateData);
       await this.onPaymentPaid(payment.id);
-      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+      clearPaymentCache(payment);
 
       console.log(`Tebex: payment ${payment.id} completed (tx: ${subject.transaction_id})`);
     } else if (type === 'payment.declined' && payment.status === 'pending') {
@@ -778,7 +1230,7 @@ export class PaymentService {
         },
       });
 
-      paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+      clearPaymentCache(payment);
 
       console.log(`Tebex: payment ${payment.id} declined (${subject.decline_reason?.code || 'unknown'})`);
     } else if (type === 'payment.refunded' && (payment.status === 'paid' || payment.status === 'delivered')) {
@@ -801,7 +1253,7 @@ export class PaymentService {
   async confirmPayment(paymentId: string): Promise<PaymentDto> {
     const payment = await Payment.findByPk(paymentId);
     if (!payment) throw new NotFoundError('Payment not found');
-    // Allow rescuing an auto-expired payment too — useful when webhook
+    // Allow rescuing an auto-expired payment too - useful when webhook
     // arrived late or buyer paid offline.
     if (payment.status !== 'pending' && payment.status !== 'expired') {
       throw new ValidationError('Payment is not pending');
@@ -815,7 +1267,7 @@ export class PaymentService {
     await this.onPaymentPaid(payment.id);
     await payment.reload();
 
-    paymentCache.delete(getCacheKey(payment.customerNickname, payment.productId));
+    clearPaymentCache(payment);
 
     return toDto(payment);
   }
@@ -845,11 +1297,13 @@ export class PaymentService {
       offset: options?.offset || 0,
     });
 
-    return { items: rows.map(toDto), total: count };
+    return { items: rows.map((p) => toDto(p)), total: count };
   }
 
   async findById(id: string): Promise<PaymentDto | null> {
-    const payment = await Payment.findByPk(id);
+    const payment = await Payment.findByPk(id, {
+      include: [{ model: PaymentItem, required: false }],
+    });
     if (!payment) return null;
 
     // Lazy-expire on read so /payments/:id/status flips immediately without
@@ -858,6 +1312,7 @@ export class PaymentService {
       await payment.update({ status: 'expired' });
     }
 
+    sortPaymentItems(payment);
     return toDto(payment);
   }
 
@@ -866,7 +1321,7 @@ export class PaymentService {
       where: { customerNickname: nickname },
       order: [['created_at', 'DESC']],
     });
-    return payments.map(toDto);
+    return payments.map((p) => toDto(p));
   }
 
   async getStats(): Promise<{
@@ -910,7 +1365,7 @@ export class PaymentService {
       })),
       totalPayments,
       totalCustomers,
-      recentPayments: recentRows.map(toDto),
+      recentPayments: recentRows.map((p) => toDto(p)),
     };
   }
 
@@ -919,21 +1374,30 @@ export class PaymentService {
     to: string;
     period: 'hourly' | 'daily' | 'weekly' | 'monthly';
     currency?: string;
+    tz?: string;
   }): Promise<{ date: string; amount: number; count: number }[]> {
-    const { from, to, period, currency } = options;
+    const { from, to, period, currency, tz } = options;
 
     const settings = await this.settingsService.get();
     const requested = currency?.toUpperCase();
     const target =
       requested && isSupportedCurrency(requested) ? requested : settings.base_currency;
 
-    const truncFn = period === 'monthly'
-      ? "date_trunc('month', paid_at)"
+    const safeTz = resolveTimeZone(tz);
+
+    // Truncate into the admin's local calendar, not the DB server's. Wrap the
+    // bucket in to_char so the value comes back as plain text in date-time form
+    // (no trailing Z), which the browser's Date parser interprets as local
+    // time — letting the frontend's local-tz interval enumerator line up the
+    // buckets without an extra TZ shift.
+    const truncBucket = period === 'monthly'
+      ? `date_trunc('month', paid_at AT TIME ZONE '${safeTz}')`
       : period === 'weekly'
-        ? "date_trunc('week', paid_at)"
+        ? `date_trunc('week', paid_at AT TIME ZONE '${safeTz}')`
         : period === 'hourly'
-          ? "date_trunc('hour', paid_at)"
-          : "date_trunc('day', paid_at)";
+          ? `date_trunc('hour', paid_at AT TIME ZONE '${safeTz}')`
+          : `date_trunc('day', paid_at AT TIME ZONE '${safeTz}')`;
+    const truncFn = `to_char(${truncBucket}, 'YYYY-MM-DD"T"HH24:MI:SS')`;
 
     const amountInTarget = buildAmountInTargetSql(
       settings.currency_rates,
@@ -972,13 +1436,16 @@ export class PaymentService {
     from: string;
     to: string;
     currency?: string;
+    tz?: string;
   }): Promise<StatsSummary> {
-    const { from, to, currency } = options;
+    const { from, to, currency, tz } = options;
 
     const settings = await this.settingsService.get();
     const requested = currency?.toUpperCase();
     const target =
       requested && isSupportedCurrency(requested) ? requested : settings.base_currency;
+
+    const safeTz = resolveTimeZone(tz);
 
     const fromDate = new Date(from);
     const toDate = new Date(to);
@@ -1002,8 +1469,20 @@ export class PaymentService {
       'commission_amount',
       'currency',
     );
+    // Same conversion but table-qualified, for the payment_items ⋈ payments
+    // join that powers the per-product breakdown.
+    const amountInTargetQualified = buildAmountInTargetSql(
+      settings.currency_rates,
+      settings.base_currency,
+      target,
+      'p.total_amount',
+      'p.currency',
+    );
 
-    const dailyTrunc = "date_trunc('day', paid_at)";
+    // Format the day directly to a string in PostgreSQL so the result is not
+    // re-interpreted as Node-local `timestamp without time zone` by the pg
+    // driver (which would shift the bucket when Node's TZ differs).
+    const dailyTrunc = `to_char(date_trunc('day', paid_at AT TIME ZONE '${safeTz}'), 'YYYY-MM-DD')`;
     const paidStatuses = { [Op.in]: ['paid', 'delivered'] as PaymentStatus[] };
     const currentWhere = {
       status: paidStatuses,
@@ -1063,19 +1542,25 @@ export class PaymentService {
         group: ['providerId'],
         raw: true,
       }),
-      Payment.findAll({
-        attributes: [
-          'productId',
-          'productName',
-          [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
-          [fn('COUNT', col('id')), 'count'],
-        ],
-        where: currentWhere,
-        group: ['productId', 'productName'],
-        order: [[fn('SUM', literal(amountInTarget)), 'DESC']] as any,
-        limit: 10,
-        raw: true,
-      }),
+      // Per-product revenue is computed from payment_items so cart orders are
+      // attributed correctly: each order's charged amount (in the target
+      // currency) is split across its items in proportion to their line_total.
+      // Legacy single-item payments have ratio 1, i.e. identical to before.
+      Payment.sequelize!.query(
+        `SELECT pi.product_id AS "productId",
+                pi.product_name AS "productName",
+                COALESCE(SUM((${amountInTargetQualified}) * (pi.line_total / NULLIF(p.product_price, 0))), 0) AS amount,
+                COUNT(DISTINCT p.id) AS count
+           FROM payment_items pi
+           JOIN payments p ON p.id = pi.payment_id
+          WHERE p.status IN ('paid', 'delivered')
+            AND p.paid_at >= :from
+            AND p.paid_at <= :to
+          GROUP BY pi.product_id, pi.product_name
+          ORDER BY amount DESC
+          LIMIT 10`,
+        { replacements: { from: fromDate, to: toDate }, type: QueryTypes.SELECT },
+      ),
     ])) as unknown as [DailyRow[], AggRow, AggRow, ProviderRow[], ProductRow[]];
 
     const amountByDay = new Map<string, number>();
@@ -1083,14 +1568,14 @@ export class PaymentService {
     const countByDay = new Map<string, number>();
     const customersByDay = new Map<string, number>();
     for (const row of dailyRows) {
-      const dayKey = new Date(row.date).toISOString().slice(0, 10);
+      const dayKey = truncatedRowToDayKey(row.date);
       amountByDay.set(dayKey, Number(row.amount) || 0);
       commissionByDay.set(dayKey, Number(row.commission) || 0);
       countByDay.set(dayKey, Number(row.count) || 0);
       customersByDay.set(dayKey, Number(row.customers) || 0);
     }
 
-    const days = eachDayUtc(fromDate, toDate);
+    const days = eachDayInTz(fromDate, toDate, safeTz);
     const round2 = (n: number): number => Math.round(n * 100) / 100;
 
     const revenueSparkline = days.map((d) => round2(amountByDay.get(d) || 0));
@@ -1157,13 +1642,44 @@ export class PaymentService {
   }
 }
 
-function eachDayUtc(from: Date, to: Date): string[] {
+function resolveTimeZone(tz?: string): string {
+  if (!tz) return 'UTC';
+  try {
+    // Throws RangeError for invalid IANA names — safe against SQL injection
+    // because we only embed strings that pass this validation.
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    return 'UTC';
+  }
+}
+
+function formatDayInTz(d: Date, tz: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d);
+  const y = parts.find((p) => p.type === 'year')?.value ?? '1970';
+  const m = parts.find((p) => p.type === 'month')?.value ?? '01';
+  const day = parts.find((p) => p.type === 'day')?.value ?? '01';
+  return `${y}-${m}-${day}`;
+}
+
+function eachDayInTz(from: Date, to: Date, tz: string): string[] {
+  const startStr = formatDayInTz(from, tz);
+  const endStr = formatDayInTz(to, tz);
   const days: string[] = [];
-  const cur = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
-  const end = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()));
+  const cur = new Date(`${startStr}T00:00:00Z`);
+  const end = new Date(`${endStr}T00:00:00Z`);
   while (cur <= end) {
     days.push(cur.toISOString().slice(0, 10));
     cur.setUTCDate(cur.getUTCDate() + 1);
   }
   return days;
+}
+
+function truncatedRowToDayKey(value: string | Date): string {
+  return String(value).slice(0, 10);
 }

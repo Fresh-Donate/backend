@@ -1,13 +1,20 @@
 import type { Payment } from '@/models/payment.model';
 import type { Product } from '@/models/product.model';
+import type { PaymentItem } from '@/models/payment-item.model';
 
 export type CommandVariables = Record<string, string>;
 
-export function buildCommandVariables(payment: Payment, product: Product): CommandVariables {
+export function buildCommandVariables(
+  payment: Payment,
+  product: Product,
+  item?: PaymentItem,
+): CommandVariables {
+  const count = item ? item.userSelectedCount : payment.userSelectedCount;
+  const units = item ? item.quantity : product.quantity;
   return {
     player: payment.customerNickname || '',
-    amount: String(product.quantity * payment.userSelectedCount),
-    product: product.name,
+    amount: String(units * count),
+    product: item ? item.productName : product.name,
   };
 }
 

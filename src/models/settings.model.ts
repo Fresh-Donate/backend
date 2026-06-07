@@ -27,6 +27,7 @@ interface SettingsAttributes {
   delivery_method: DeliveryMethod;
   rcon_config: RconConfig;
   plugin_config: PluginConfig;
+  multi_server_enabled: boolean;
   base_currency: SupportedCurrency;
   currency_rates: CurrencyRates;
   telemetry_enabled: boolean;
@@ -39,7 +40,7 @@ interface SettingsAttributes {
 
 type SettingsCreationAttributes = Optional<
   SettingsAttributes,
-  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'base_currency' | 'currency_rates' | 'telemetry_enabled' | 'installation_id' | 'smtp_config' | 'receipt_template' | 'createdAt' | 'updatedAt'
+  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'multi_server_enabled' | 'base_currency' | 'currency_rates' | 'telemetry_enabled' | 'installation_id' | 'smtp_config' | 'receipt_template' | 'createdAt' | 'updatedAt'
 >;
 
 export const DEFAULT_SMTP_CONFIG: SmtpConfig = {
@@ -54,7 +55,7 @@ export const DEFAULT_SMTP_CONFIG: SmtpConfig = {
 };
 
 export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplate = {
-  subject: 'Чек о покупке — {productName} ({shopName})',
+  subject: 'Чек о покупке - {productName} ({shopName})',
   html: `<!doctype html>
 <html lang="ru">
 <head>
@@ -73,7 +74,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplate = {
       <td style="padding:24px 28px;">
         <p style="margin:0 0 16px;font-size:15px;line-height:1.5;">
           Привет, <strong>{nickname}</strong>! Мы получили вашу оплату.
-          Это письмо — подтверждение покупки. Сохраните его — при обращении в поддержку
+          Это письмо - подтверждение покупки. Сохраните его - при обращении в поддержку
           сообщите номер заказа ниже.
         </p>
 
@@ -83,12 +84,10 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplate = {
             <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:13px;font-family:Menlo,Consolas,monospace;">{paymentId}</td>
           </tr>
           <tr>
-            <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:13px;color:#6b7280;">Товар</td>
-            <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:14px;font-weight:600;">{productName}</td>
-          </tr>
-          <tr>
-            <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:13px;color:#6b7280;">Количество</td>
-            <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:13px;">{quantity}</td>
+            <td colspan="2" style="padding:10px 0;border-bottom:1px solid #eef0f3;">
+              <div style="font-size:13px;color:#6b7280;margin-bottom:4px;">Состав заказа</div>
+              {itemsTable}
+            </td>
           </tr>
           <tr>
             <td style="padding:10px 0;border-bottom:1px solid #eef0f3;font-size:13px;color:#6b7280;">Сумма</td>
@@ -117,7 +116,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplate = {
     <tr>
       <td style="padding:18px 28px;background:#f8fafc;border-top:1px solid #e6e8eb;font-size:12px;color:#6b7280;text-align:center;">
         Это автоматическое письмо. Отвечать на него не нужно.<br />
-        Если есть вопросы — напишите на {contactEmail}.
+        Если есть вопросы - напишите на {contactEmail}.
       </td>
     </tr>
   </table>
@@ -143,6 +142,10 @@ export class Settings extends BaseModel<SettingsAttributes, SettingsCreationAttr
   @Column(DataType.JSONB)
   declare plugin_config: PluginConfig;
 
+  @Default(false)
+  @Column(DataType.BOOLEAN)
+  declare multi_server_enabled: boolean;
+
   @Default('RUB')
   @Column(DataType.STRING(8))
   declare base_currency: SupportedCurrency;
@@ -163,7 +166,6 @@ export class Settings extends BaseModel<SettingsAttributes, SettingsCreationAttr
   @Column(DataType.JSONB)
   declare smtp_config: SmtpConfig;
 
-  @Default(DEFAULT_RECEIPT_TEMPLATE)
   @Column(DataType.JSONB)
   declare receipt_template: ReceiptTemplate;
 }
