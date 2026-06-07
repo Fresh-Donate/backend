@@ -15,6 +15,10 @@ export default fp(async (fastify) => {
       });
     }
 
+    if (error.code === 'FST_ERR_RATE_LIMIT') {
+      return reply.code(error.statusCode || 429).send(error);
+    }
+
     if (error.validation) {
       return reply.code(400).send({
         error: 'ValidationError',
