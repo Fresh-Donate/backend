@@ -7,17 +7,23 @@ export default fp<RateLimitPluginOptions>(async (fastify) => {
     max: config.rateLimit.max,
     timeWindow: config.rateLimit.timeWindow,
     cache: config.rateLimit.cache,
-    keyGenerator: (req) => req.ip,
-    errorResponseBuilder: (_req, ctx) => {
-      const err = new Error('Rate limit exceeded. Please try again later.') as Error & {
-        statusCode: number;
-        code: string;
-        error: string;
-      };
-      err.statusCode = ctx.statusCode;
-      err.code = 'FST_ERR_RATE_LIMIT';
-      err.error = ctx.ban ? 'Forbidden' : 'Too Many Requests';
-      return err;
+    keyGenerator: (req) => {
+      const ip = req.ip || req.headers['x-real-ip'];
+      console.log(ip);
+      return typeof ip === 'string' ? ip : 'unknown-ip';
     },
+    errorResponseBuilder: (req, ctx) => ({
+      statusCode: ctx.statusCode,
+      error: ctx.ban ? 'Forbidden' : 'Too Many Requests',
+      code: 'FST_ERR_RATE_LIMIT',
+      message: 'Rate limit exceeded. Please try again later.',
+      key: req.ip,
+      ips: req.ips,
+      remoteAddress: req.socket.remoteAddress,
+      forwardedFor: req.headers['x-forwarded-for'],
+      realIp: req.headers['x-real-ip'],
+      limit: ctx.max,
+      timeWindow: ctx.after,
+    }),
   });
 });
