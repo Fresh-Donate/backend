@@ -7,11 +7,7 @@ export default fp<RateLimitPluginOptions>(async (fastify) => {
     max: config.rateLimit.max,
     timeWindow: config.rateLimit.timeWindow,
     cache: config.rateLimit.cache,
-    keyGenerator: (req) => {
-      const ip = req.ip || req.headers['x-real-ip'];
-      console.log(ip);
-      return typeof ip === 'string' ? ip : 'unknown-ip';
-    },
+    keyGenerator: (req) => req.ip,
     errorResponseBuilder: (req, ctx) => ({
       statusCode: ctx.statusCode,
       error: ctx.ban ? 'Forbidden' : 'Too Many Requests',
