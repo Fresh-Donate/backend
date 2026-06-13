@@ -1,6 +1,6 @@
 {
   "name": "fresh-donate-backend",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "This project was bootstrapped with Fastify-CLI.",
   "main": "app.ts",
   "directories": {
