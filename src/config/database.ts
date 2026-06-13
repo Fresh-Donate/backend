@@ -219,8 +219,6 @@ export async function initDatabase(): Promise<void> {
     const existingTables = await sequelize.getQueryInterface().showAllTables();
     const isFirstRun = existingTables.length === 0;
 
-    console.log(isFirstRun, existingTables);
-
     if (isFirstRun) {
       console.log('Detected first run. Syncing models without migration...');
       await sequelize.sync({ alter: true }).then(() => {
