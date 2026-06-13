@@ -216,6 +216,18 @@ export async function initDatabase(): Promise<void> {
     await sequelize.authenticate();
     console.log('Database connection established successfully.');
 
+    const existingTables = await sequelize.getQueryInterface().showAllTables();
+    const isFirstRun = existingTables.length === 0;
+
+    if (isFirstRun) {
+      console.log('Detected first run. Syncing models without migration...');
+      sequelize.sync({ alter: true }).then(() => {
+        console.log('Database synced.');
+      }).catch((err) => {
+        console.error('Database sync failed:', err);
+      });
+    }
+
     await migrateCustomersToSnapshot(sequelize as unknown as Sequelize);
     await migrateMultiServerTables(sequelize as unknown as Sequelize);
     await migrateCartTables(sequelize as unknown as Sequelize);
