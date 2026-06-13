@@ -221,7 +221,7 @@ export async function initDatabase(): Promise<void> {
 
     if (isFirstRun) {
       console.log('Detected first run. Syncing models without migration...');
-      sequelize.sync({ alter: true }).then(() => {
+      await sequelize.sync({ alter: true }).then(() => {
         console.log('Database synced.');
       }).catch((err) => {
         console.error('Database sync failed:', err);
