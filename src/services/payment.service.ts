@@ -41,10 +41,20 @@ import type {
   WataWebhookPayload,
   RobokassaWebhookPayload,
   RobokassaHashAlgorithm,
+  RobokassaReceipt,
+  RobokassaReceiptItem,
+  RobokassaSno,
+  RobokassaTax,
+  RobokassaPaymentMethod,
+  RobokassaPaymentObject,
   TebexWebhookEnvelope,
   CryptoBotWebhookUpdate,
   CryptoBotFiat,
   StatsSummary,
+  YooKassaReceipt,
+  YooKassaVatCode,
+  YooKassaPaymentMode,
+  YooKassaPaymentSubject,
 } from '@/types';
 
 function toItemDto(i: PaymentItem): PaymentItemDto {
@@ -138,6 +148,117 @@ interface ResolvedItem {
   discountPercent: number; // stacked promo percent
   upgradeDiscount: number; // per-unit upgrade discount applied
   lineTotal: number; // unitPrice * count, product currency
+}
+
+// 54-ФЗ fiscalization config stored under provider.providerConfig.fiscalization.
+// Shape is opt-in: when `enabled` is false/missing the gateways receive no
+// receipt and the wire format stays identical to the pre-fiscalization code.
+interface RobokassaFiscalizationConfig {
+  enabled?: boolean;
+  sno?: RobokassaSno;
+  tax?: RobokassaTax;
+  paymentMethod?: RobokassaPaymentMethod;
+  paymentObject?: RobokassaPaymentObject;
+}
+
+interface YooKassaFiscalizationConfig {
+  enabled?: boolean;
+  vatCode?: YooKassaVatCode;
+  paymentMode?: YooKassaPaymentMode;
+  paymentSubject?: YooKassaPaymentSubject;
+}
+
+function readRobokassaFiscalization(
+  providerConfig: Record<string, any> | undefined,
+): RobokassaFiscalizationConfig | undefined {
+  const raw = providerConfig?.fiscalization;
+  if (!raw || typeof raw !== 'object' || raw.enabled !== true) return undefined;
+  return raw as RobokassaFiscalizationConfig;
+}
+
+function readYooKassaFiscalization(
+  providerConfig: Record<string, any> | undefined,
+): YooKassaFiscalizationConfig | undefined {
+  const raw = providerConfig?.fiscalization;
+  if (!raw || typeof raw !== 'object' || raw.enabled !== true) return undefined;
+  return raw as YooKassaFiscalizationConfig;
+}
+
+// Splits the basket into receipt lines and reconciles the sum to the actual
+// charged total (totalAmount). Per-line `sum` is unitPrice * userSelectedCount;
+// any rounding residue is pushed onto the last line so the receipt sums match
+// what the buyer is actually paying, which is what the tax authority checks.
+function buildRobokassaReceipt(
+  items: PaymentItem[],
+  totalAmount: number,
+  fc: RobokassaFiscalizationConfig,
+): RobokassaReceipt | undefined {
+  if (!items.length) return undefined;
+  const tax: RobokassaTax = fc.tax ?? 'none';
+  const paymentMethod: RobokassaPaymentMethod = fc.paymentMethod ?? 'full_payment';
+  const paymentObject: RobokassaPaymentObject = fc.paymentObject ?? 'service';
+
+  const lines: RobokassaReceiptItem[] = items.map((i) => ({
+    name: i.productName || 'Товар',
+    quantity: i.userSelectedCount || 1,
+    sum: Math.round(Number(i.lineTotal) * 100) / 100,
+    payment_method: paymentMethod,
+    payment_object: paymentObject,
+    tax,
+  }));
+
+  const linesSum = lines.reduce((s, l) => s + l.sum, 0);
+  const diff = Math.round((totalAmount - linesSum) * 100) / 100;
+  if (Math.abs(diff) >= 0.01 && lines.length > 0) {
+    const last = lines[lines.length - 1]!;
+    last.sum = Math.round((last.sum + diff) * 100) / 100;
+  }
+
+  return {
+    ...(fc.sno ? { sno: fc.sno } : {}),
+    items: lines,
+  };
+}
+
+function buildYooKassaReceipt(
+  items: PaymentItem[],
+  totalAmount: number,
+  currency: string,
+  email: string | null | undefined,
+  fc: YooKassaFiscalizationConfig,
+): YooKassaReceipt | undefined {
+  if (!items.length) return undefined;
+  // YooKassa rejects receipts without at least one customer contact.
+  if (!email) return undefined;
+
+  const vat: YooKassaVatCode = fc.vatCode ?? 1;
+  const mode: YooKassaPaymentMode = fc.paymentMode ?? 'full_payment';
+  const subject: YooKassaPaymentSubject = fc.paymentSubject ?? 'service';
+
+  const lines = items.map((i) => {
+    const perLine = Math.round(Number(i.lineTotal) * 100) / 100;
+    return {
+      description: (i.productName || 'Товар').slice(0, 128),
+      quantity: String(i.userSelectedCount || 1),
+      amount: { value: perLine.toFixed(2), currency },
+      vat_code: vat,
+      payment_mode: mode,
+      payment_subject: subject,
+    };
+  });
+
+  const linesSum = lines.reduce((s, l) => s + Number(l.amount.value), 0);
+  const diff = Math.round((totalAmount - linesSum) * 100) / 100;
+  if (Math.abs(diff) >= 0.01) {
+    const last = lines[lines.length - 1]!;
+    const fixed = Math.round((Number(last.amount.value) + diff) * 100) / 100;
+    last.amount = { value: fixed.toFixed(2), currency };
+  }
+
+  return {
+    customer: { email },
+    items: lines,
+  };
 }
 
 // Russian plural for "N товаров" used in the external-payment description.
@@ -624,6 +745,19 @@ export class PaymentService {
       const gateway = new YooKassaGateway(shopId, secretKey);
       const returnUrl = config.payment.returnUrl;
 
+      const yooFc = readYooKassaFiscalization(provider.providerConfig);
+      let yooReceipt: YooKassaReceipt | undefined;
+      if (yooFc) {
+        const paymentItems = await PaymentItem.findAll({ where: { paymentId: payment.id } });
+        yooReceipt = buildYooKassaReceipt(
+          paymentItems,
+          Number(payment.totalAmount),
+          payment.currency,
+          payment.customerEmail,
+          yooFc,
+        );
+      }
+
       const yooPayment = await gateway.createPayment({
         amount: Number(payment.totalAmount),
         currency: payment.currency,
@@ -634,6 +768,7 @@ export class PaymentService {
           customer_nickname: payment.customerNickname,
           product_id: payment.productId,
         },
+        ...(yooReceipt ? { receipt: yooReceipt } : {}),
       });
 
       await payment.update({
@@ -758,12 +893,25 @@ export class PaymentService {
       );
 
       const invId = RobokassaGateway.makeInvId(payment.id);
+
+      const robokassaFc = readRobokassaFiscalization(provider.providerConfig);
+      let robokassaReceipt: RobokassaReceipt | undefined;
+      if (robokassaFc) {
+        const paymentItems = await PaymentItem.findAll({ where: { paymentId: payment.id } });
+        robokassaReceipt = buildRobokassaReceipt(
+          paymentItems,
+          Number(payment.totalAmount),
+          robokassaFc,
+        );
+      }
+
       const link = gateway.createPaymentLink({
         amount: Number(payment.totalAmount),
         invId,
         description: `${productName} - FreshDonate`,
         email: payment.customerEmail || undefined,
         userParams: { paymentId: payment.id },
+        ...(robokassaReceipt ? { receipt: robokassaReceipt } : {}),
       });
 
       await payment.update({
