@@ -59,11 +59,13 @@ export class RobokassaGateway {
       .map((key) => `Shp_${key}=${userParams[key]}`);
   }
 
-  // Serializes the receipt the way Robokassa expects in the URL: JSON encoded
-  // via encodeURIComponent. Keys/order are stable since we own the object.
-  // The same encoded form is what must appear in the signature input on both
-  // create and webhook verification.
-  private static encodeReceipt(receipt: RobokassaReceipt): string {
+  // Serializes the receipt to the canonical JSON string. This RAW (un-encoded)
+  // JSON is what goes into the signature: Robokassa's web server url-decodes
+  // the query param before computing the control sum, so it hashes the plain
+  // JSON, not the percent-encoded form. The URL carries the encodeURIComponent
+  // of this same string (see createPaymentLink) - encoding belongs to
+  // transport only, never to the signature.
+  private static serializeReceipt(receipt: RobokassaReceipt): string {
     const sumFor = (n: number): number => Math.round(n * 100) / 100;
     const normalized = {
       ...(receipt.sno ? { sno: receipt.sno } : {}),
@@ -76,7 +78,7 @@ export class RobokassaGateway {
         tax: i.tax,
       })),
     };
-    return encodeURIComponent(JSON.stringify(normalized));
+    return JSON.stringify(normalized);
   }
 
   private hash(input: string): string {
@@ -99,19 +101,21 @@ export class RobokassaGateway {
 
     const outSum = params.amount.toFixed(2);
     const shpSegments = RobokassaGateway.buildShpSegments(params.userParams);
-    const receiptEncoded = params.receipt
-      ? RobokassaGateway.encodeReceipt(params.receipt)
+    // Raw JSON for the signature; percent-encoded form for the URL only.
+    const receiptJson = params.receipt
+      ? RobokassaGateway.serializeReceipt(params.receipt)
       : undefined;
 
     // Signature layout per Robokassa docs:
     //   MerchantLogin:OutSum:InvId[:Receipt]:Password1[:Shp_X=Y…]
-    // Receipt slot is skipped entirely when not present, preserving the
-    // legacy (pre-fiscalization) signature byte-for-byte.
+    // Receipt is the RAW JSON (Robokassa url-decodes the param before hashing).
+    // The slot is skipped entirely when not present, preserving the legacy
+    // (pre-fiscalization) signature byte-for-byte.
     const signatureInput = [
       this.merchantLogin,
       outSum,
       String(params.invId),
-      ...(receiptEncoded ? [receiptEncoded] : []),
+      ...(receiptJson ? [receiptJson] : []),
       this.password1,
       ...shpSegments,
     ].join(':');
@@ -136,10 +140,11 @@ export class RobokassaGateway {
     }
 
     let url = `${ROBOKASSA_PAY_URL}?${query.toString()}`;
-    if (receiptEncoded) {
-      // Append Receipt as the already-encoded string so it matches the
-      // signature input exactly. URLSearchParams would re-encode `%` as `%25`.
-      url += `&Receipt=${receiptEncoded}`;
+    if (receiptJson) {
+      // Transport encoding only: Robokassa url-decodes this back to the raw
+      // JSON used in the signature. Appended manually so URLSearchParams
+      // doesn't double-encode the `%` sequences.
+      url += `&Receipt=${encodeURIComponent(receiptJson)}`;
     }
 
     return {
@@ -149,10 +154,10 @@ export class RobokassaGateway {
   }
 
   // ResultURL signature: hash(`OutSum:InvId[:Receipt]:Password2[:Shp_X=Y...]`).
-  // Receipt is echoed back by Robokassa only when it was sent on create; we
-  // detect its presence in the payload and include the re-encoded value in
-  // the signature input the same way as on create. Payments created before
-  // fiscalization was enabled will hit the no-Receipt branch and verify
+  // When Receipt is present it participates as RAW JSON - Fastify already
+  // url-decoded the form body, so payload.Receipt is the plain JSON string
+  // that matches what Robokassa signed. Payments created before fiscalization
+  // (or ResultURLs that omit Receipt) hit the no-Receipt branch and verify
   // against the legacy signature format.
   verifyWebhookSignature(payload: RobokassaWebhookPayload): boolean {
     const received = payload.SignatureValue;
@@ -167,12 +172,12 @@ export class RobokassaGateway {
       }
     }
     const shpSegments = RobokassaGateway.buildShpSegments(shpParams);
-    const receiptEncoded = RobokassaGateway.reencodeReceiptFromPayload(payload.Receipt);
+    const receiptJson = payload.Receipt || undefined;
 
     const input = [
       payload.OutSum,
       payload.InvId,
-      ...(receiptEncoded ? [receiptEncoded] : []),
+      ...(receiptJson ? [receiptJson] : []),
       this.password2,
       ...shpSegments,
     ].join(':');
@@ -194,26 +199,17 @@ export class RobokassaGateway {
       }
     }
     const shpSegments = RobokassaGateway.buildShpSegments(shpParams);
-    const receiptEncoded = RobokassaGateway.reencodeReceiptFromPayload(payload.Receipt);
+    const receiptJson = payload.Receipt || undefined;
 
     const input = [
       payload.OutSum,
       payload.InvId,
-      ...(receiptEncoded ? [receiptEncoded] : []),
+      ...(receiptJson ? [receiptJson] : []),
       this.password1,
       ...shpSegments,
     ].join(':');
     const expected = this.hash(input);
 
     return received.toUpperCase() === expected;
-  }
-
-  // When Fastify parses the form-urlencoded webhook body it already decodes
-  // Receipt back to JSON. To reconstruct the signature input we must re-apply
-  // encodeURIComponent. Returns undefined when Receipt isn't present, which
-  // routes the verifier to the legacy signature format.
-  private static reencodeReceiptFromPayload(raw: string | undefined): string | undefined {
-    if (!raw) return undefined;
-    return encodeURIComponent(raw);
   }
 }
