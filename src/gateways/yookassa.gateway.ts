@@ -44,6 +44,10 @@ export class YooKassaGateway {
       };
     }
 
+    if (params.receipt) {
+      body.receipt = params.receipt;
+    }
+
     try {
       const { data } = await this.client.post<YooKassaPayment>('/payments', body, {
         headers: { 'Idempotence-Key': idempotencyKey },
