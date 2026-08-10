@@ -54,8 +54,8 @@ export const config = {
   },
 
   telemetry: {
-    host: process.env.APTABASE_HOST || 'https://telemetry.fd.zaralx.ru',
-    appKey: process.env.APTABASE_APP_KEY || 'A-SH-9656128816',
+    host: process.env.APTABASE_HOST || 'https://telemetry.zaralx.ru',
+    appKey: process.env.APTABASE_APP_KEY || 'A-SH-6436156094',
     disabled: process.env.APTABASE_DISABLED === 'true' || process.env.SKIP_TELEMETRY === 'true',
   },
 } as const;
