@@ -2,6 +2,12 @@ import { type FastifyPluginAsync } from 'fastify';
 import { CustomerService } from '@/services/customer.service';
 import { PaymentService } from '@/services/payment.service';
 
+function parseDate(value: string | undefined): Date | undefined | null {
+  if (value === undefined || value === '') return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const customerService = new CustomerService();
   const paymentService = new PaymentService();
@@ -13,14 +19,20 @@ const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       offset?: string;
       sortBy?: string;
       sortOrder?: string;
+      from?: string;
+      to?: string;
     };
   }>('/', {
     onRequest: [fastify.authenticate],
-  }, async (request) => {
+  }, async (request, reply) => {
     const { search, limit, offset, sortBy, sortOrder } = request.query;
 
-    // Whitelist sort params - protects against arbitrary SQL identifiers
-    // sneaking into the ORDER clause via the literal() branch in the service.
+    const from = parseDate(request.query.from);
+    const to = parseDate(request.query.to);
+    if (from === null || to === null) {
+      return reply.code(400).send({ error: 'Invalid `from` or `to` - expected an ISO date' });
+    }
+
     const allowedSortBy = ['nickname', 'email', 'createdAt', 'purchaseCount', 'totalSpent'] as const;
     type SortBy = typeof allowedSortBy[number];
     const validSortBy: SortBy | undefined = (allowedSortBy as readonly string[]).includes(sortBy ?? '')
@@ -35,15 +47,24 @@ const customerRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       offset: offset ? parseInt(offset, 10) : undefined,
       sortBy: validSortBy,
       sortOrder: validSortOrder,
+      from,
+      to,
     });
   });
 
-  // Customer key is the Minecraft nickname - there's no stored UUID anymore,
-  // customer data is aggregated from `payments` on the fly.
-  fastify.get<{ Params: { nickname: string } }>('/:nickname', {
+  fastify.get<{
+    Params: { nickname: string };
+    Querystring: { from?: string; to?: string };
+  }>('/:nickname', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
-    const customer = await customerService.findById(request.params.nickname);
+    const from = parseDate(request.query.from);
+    const to = parseDate(request.query.to);
+    if (from === null || to === null) {
+      return reply.code(400).send({ error: 'Invalid `from` or `to` - expected an ISO date' });
+    }
+
+    const customer = await customerService.findById(request.params.nickname, { from, to });
     if (!customer) return reply.code(404).send({ error: 'Customer not found' });
     return customer;
   });
