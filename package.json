@@ -11,11 +11,11 @@
   },
   "scripts": {
     "test": "npm run build:ts && tsc -p test/tsconfig.json && c8 node --test --test-concurrency=1 -r ts-node/register -r tsconfig-paths/register -r ./test/setup.ts \"test/**/*.ts\"",
-    "start": "npm run build:ts && fastify start -r module-alias/register -l info dist/app.js",
+    "start": "npm run build:ts && fastify start -r module-alias/register -o -l info dist/app.js",
     "build:ts": "tsc && tsc-alias",
     "dev": "npm run build:ts && concurrently -k -p \"[{name}]\" -n \"TypeScript,App\" -c \"yellow.bold,cyan.bold\" \"npm:dev:watch\" \"npm:dev:start\"",
     "dev:watch": "tsc -w",
-    "dev:start": "fastify start -r module-alias/register --ignore-watch=.ts$ -w -l info -P dist/app.js",
+    "dev:start": "fastify start -r module-alias/register -o --ignore-watch=.ts$ -w -l info -P dist/app.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
