@@ -2,6 +2,7 @@ export const config = {
   server: {
     host: process.env.HOST || '0.0.0.0',
     port: parseInt(process.env.PORT || '3001', 10),
+    pluginTimeout: parseInt(process.env.PLUGIN_TIMEOUT || '30000', 10),
   },
 
   database: {
