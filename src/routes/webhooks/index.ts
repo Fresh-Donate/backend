@@ -1,12 +1,12 @@
 import { type FastifyPluginAsync } from 'fastify';
 import { PaymentService } from '@/services/payment.service';
-import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
 import { TebexGateway } from '@/gateways/tebex.gateway';
 import { CryptoBotGateway } from '@/gateways/cryptobot.gateway';
 import { RobokassaGateway } from '@/gateways/robokassa.gateway';
 import { PaymentProvider } from '@/models/payment-provider.model';
+import { PaymentError } from '@/core/errors';
 import type { CryptoBotWebhookUpdate, RobokassaHashAlgorithm, RobokassaWebhookPayload } from '@/types';
 
 const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
@@ -54,8 +54,6 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     },
   );
 
-  // YooKassa: no signing - validated by source IP. x-forwarded-for takes
-  // priority when behind a reverse proxy (Docker, nginx).
   fastify.post<{
     Body: {
       type: string;
@@ -76,27 +74,17 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       },
     },
   }, async (request, reply) => {
-    const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
-    const clientIp = forwardedFor || request.ip || '';
-
-    const skipIpCheck = process.env.NODE_ENV === 'development'
-      || process.env.YOOKASSA_SKIP_IP_CHECK === 'true';
-
-    if (!skipIpCheck && !YooKassaGateway.isValidWebhookIp(clientIp)) {
-      request.log.warn(`YooKassa webhook rejected: invalid source IP ${clientIp}`);
-      return reply.code(403).send({ error: 'Forbidden' });
-    }
-
     const { event, object } = request.body;
 
     request.log.info(`YooKassa webhook: ${event} for payment ${object?.id}`);
 
     try {
-      await paymentService.handleYooKassaWebhook(event, object);
+      await paymentService.handleYooKassaWebhook(String(object?.id ?? ''));
     } catch (error: any) {
-      // Log but don't fail - YooKassa retries on non-200, and we'd rather
-      // ack a flawed payload than receive duplicates.
       request.log.error(`YooKassa webhook processing error: ${error.message}`);
+      if (error instanceof PaymentError) {
+        return reply.code(503).send({ error: 'Payment status unavailable, retry later' });
+      }
     }
 
     return reply.code(200).send({ status: 'ok' });
@@ -115,23 +103,14 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
     const { apiKey, merchantId } = provider.credentials;
 
-    const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
-    const clientIp = forwardedFor || request.ip || '';
-
-    const skipIpCheck = process.env.NODE_ENV === 'development'
-      || process.env.HELEKET_SKIP_IP_CHECK === 'true';
-
-    if (!skipIpCheck && !HeleketGateway.isValidWebhookIp(clientIp)) {
-      request.log.warn(`Heleket webhook rejected: invalid source IP ${clientIp}`);
-      return reply.code(403).send({ error: 'Forbidden' });
+    if (!apiKey) {
+      request.log.warn('Heleket webhook rejected: apiKey not configured, cannot verify signature');
+      return reply.code(403).send({ error: 'Not configured' });
     }
-
-    if (apiKey) {
-      const gateway = new HeleketGateway(merchantId, apiKey);
-      if (!gateway.verifyWebhookSignature(request.body)) {
-        request.log.warn('Heleket webhook rejected: invalid signature');
-        return reply.code(403).send({ error: 'Invalid signature' });
-      }
+    const gateway = new HeleketGateway(merchantId, apiKey);
+    if (!gateway.verifyWebhookSignature(request.body)) {
+      request.log.warn('Heleket webhook rejected: invalid signature');
+      return reply.code(403).send({ error: 'Invalid signature' });
     }
 
     const payload = request.body;
@@ -162,8 +141,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     const rawBody: Buffer | undefined = (request as any).rawBody;
     const signature = request.headers['crypto-pay-api-signature'] as string | undefined;
 
-    const skipSig = process.env.NODE_ENV === 'development'
-      || process.env.CRYPTOBOT_SKIP_SIGNATURE_CHECK === 'true';
+    const skipSig = process.env.CRYPTOBOT_SKIP_SIGNATURE_CHECK === 'true';
 
     if (!skipSig) {
       if (!apiToken) {
@@ -211,8 +189,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     const rawBody: Buffer | undefined = (request as any).rawBody;
     const signature = request.headers['x-signature'] as string | undefined;
 
-    const skipSig = process.env.NODE_ENV === 'development'
-      || process.env.WATA_SKIP_SIGNATURE_CHECK === 'true';
+    const skipSig = process.env.WATA_SKIP_SIGNATURE_CHECK === 'true';
 
     if (!skipSig) {
       if (!apiKey) {
@@ -264,8 +241,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     const rawBody: Buffer | undefined = (request as any).rawBody;
     const signature = request.headers['x-signature'] as string | undefined;
 
-    const skipSig = process.env.NODE_ENV === 'development'
-      || process.env.TEBEX_SKIP_SIGNATURE_CHECK === 'true';
+    const skipSig = process.env.TEBEX_SKIP_SIGNATURE_CHECK === 'true';
 
     if (!skipSig) {
       if (!webhookSecret) {
@@ -319,8 +295,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
     const { merchantLogin, password1, password2 } = provider.credentials;
 
-    const skipSig = process.env.NODE_ENV === 'development'
-      || process.env.ROBOKASSA_SKIP_SIGNATURE_CHECK === 'true';
+    const skipSig = process.env.ROBOKASSA_SKIP_SIGNATURE_CHECK === 'true';
 
     if (!skipSig) {
       if (!merchantLogin || !password1 || !password2) {

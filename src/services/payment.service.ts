@@ -959,8 +959,8 @@ export class PaymentService {
     }
   }
 
-  async handleYooKassaWebhook(event: string, object: any): Promise<void> {
-    const externalId = object?.id;
+  // notifications are unsigned, so the status comes from the API, not from the body
+  async handleYooKassaWebhook(externalId: string): Promise<void> {
     if (!externalId) return;
 
     const payment = await Payment.findOne({
@@ -970,8 +970,19 @@ export class PaymentService {
       console.warn(`YooKassa webhook: payment not found for external ID ${externalId}`);
       return;
     }
+    if (payment.status !== 'pending' && payment.status !== 'expired') return;
 
-    if (event === 'payment.succeeded' && (payment.status === 'pending' || payment.status === 'expired')) {
+    const provider = await PaymentProvider.findOne({ where: { providerId: 'yookassa' } });
+    const { shopId, secretKey } = provider?.credentials ?? {};
+    if (!shopId || !secretKey) {
+      console.warn(`YooKassa webhook: credentials not configured, payment ${payment.id} left as ${payment.status}`);
+      return;
+    }
+
+    const gateway = new YooKassaGateway(shopId, secretKey);
+    const object = await gateway.getPayment(externalId);
+
+    if (object.status === 'succeeded' && (payment.status === 'pending' || payment.status === 'expired')) {
       const paidAmount = object.amount ? Number(object.amount.value) : Number(payment.totalAmount);
       const incomeAmount = object.income_amount ? Number(object.income_amount.value) : undefined;
 
@@ -997,7 +1008,7 @@ export class PaymentService {
       clearPaymentCache(payment);
 
       console.log(`YooKassa: payment ${payment.id} succeeded (external: ${externalId})`);
-    } else if (event === 'payment.canceled' && payment.status === 'pending') {
+    } else if (object.status === 'canceled' && payment.status === 'pending') {
       await payment.update({
         status: 'failed',
         meta: {
@@ -1010,16 +1021,9 @@ export class PaymentService {
       clearPaymentCache(payment);
 
       console.log(`YooKassa: payment ${payment.id} canceled (external: ${externalId})`);
-    } else if (event === 'payment.waiting_for_capture' && payment.status === 'pending') {
+    } else if (object.status === 'waiting_for_capture' && payment.status === 'pending') {
       // Auto-capture: confirm immediately so the buyer's card is actually charged.
-      const provider = await PaymentProvider.findOne({ where: { providerId: 'yookassa' } });
-      if (provider) {
-        const { shopId, secretKey } = provider.credentials;
-        if (shopId && secretKey) {
-          const gateway = new YooKassaGateway(shopId, secretKey);
-          await gateway.capturePayment(externalId, Number(payment.totalAmount), payment.currency);
-        }
-      }
+      await gateway.capturePayment(externalId, Number(payment.totalAmount), payment.currency);
     }
   }
 

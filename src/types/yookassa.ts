@@ -34,6 +34,10 @@ export interface YooKassaPayment {
   created_at: string;
   captured_at?: string;
   expires_at?: string;
+  cancellation_details?: {
+    party: string;
+    reason: string;
+  };
 }
 
 export interface YooKassaRefund {
