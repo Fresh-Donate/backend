@@ -34,13 +34,14 @@ interface SettingsAttributes {
   installation_id: string;
   smtp_config: SmtpConfig;
   receipt_template: ReceiptTemplate;
+  jwt_secret: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 type SettingsCreationAttributes = Optional<
   SettingsAttributes,
-  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'multi_server_enabled' | 'base_currency' | 'currency_rates' | 'telemetry_enabled' | 'installation_id' | 'smtp_config' | 'receipt_template' | 'createdAt' | 'updatedAt'
+  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'multi_server_enabled' | 'base_currency' | 'currency_rates' | 'telemetry_enabled' | 'installation_id' | 'smtp_config' | 'receipt_template' | 'jwt_secret' | 'createdAt' | 'updatedAt'
 >;
 
 export const DEFAULT_SMTP_CONFIG: SmtpConfig = {
@@ -168,4 +169,7 @@ export class Settings extends BaseModel<SettingsAttributes, SettingsCreationAttr
 
   @Column(DataType.JSONB)
   declare receipt_template: ReceiptTemplate;
+
+  @Column(DataType.STRING(128))
+  declare jwt_secret: string | null;
 }

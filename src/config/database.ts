@@ -101,6 +101,11 @@ async function migrateMultiServerTables(db: Sequelize): Promise<void> {
   await db.query(`
     ALTER TABLE settings ALTER COLUMN receipt_template DROP NOT NULL;
   `);
+
+  await db.query(`
+    ALTER TABLE settings
+      ADD COLUMN IF NOT EXISTS jwt_secret VARCHAR(128);
+  `);
 }
 
 // Idempotent DDL + backfill for the optional shopping-cart feature. A cart

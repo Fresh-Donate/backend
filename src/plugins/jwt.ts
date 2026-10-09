@@ -1,11 +1,25 @@
 import fp from 'fastify-plugin';
 import fjwt, { type FastifyJWTOptions } from '@fastify/jwt';
-import { type FastifyRequest, type FastifyReply } from 'fastify';
+import { type FastifyBaseLogger, type FastifyRequest, type FastifyReply } from 'fastify';
+import { randomBytes } from 'node:crypto';
 import { config } from '@/config';
+import { SettingsService } from '@/services/settings.service';
+
+const EXAMPLE_SECRET = 'change-me-to-a-random-secret-in-production';
+
+async function resolveSecret(log: FastifyBaseLogger): Promise<string> {
+  const fromEnv = config.jwt.secret;
+  if (fromEnv && fromEnv !== EXAMPLE_SECRET) return fromEnv;
+  if (fromEnv) {
+    log.warn('JWT_SECRET still has the example value from .env.example, ignoring it and using the secret stored in the database');
+  }
+  if (process.env.SKIP_DB === 'true') return randomBytes(48).toString('hex');
+  return new SettingsService().getJwtSecret();
+}
 
 export default fp<FastifyJWTOptions>(async (fastify) => {
   await fastify.register(fjwt, {
-    secret: config.jwt.secret,
+    secret: await resolveSecret(fastify.log),
     sign: {
       expiresIn: config.jwt.expiresIn,
     },

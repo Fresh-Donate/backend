@@ -19,7 +19,7 @@ export const config = {
   },
 
   jwt: {
-    secret: process.env.JWT_SECRET || 'change-me-to-a-random-secret-in-production',
+    secret: process.env.JWT_SECRET || null,
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
 
