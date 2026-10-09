@@ -99,6 +99,7 @@ test('GET /auth/me — returns user info with valid token', async (t) => {
   const body = JSON.parse(res.payload);
   assert.strictEqual(body.user.login, ADMIN_LOGIN);
   assert.strictEqual(body.user.role, 'admin');
+  assert.deepStrictEqual(body.warnings, ['example_admin_password']);
 });
 
 test('GET /auth/me — 401 with invalid token', async (t) => {
@@ -111,4 +112,21 @@ test('GET /auth/me — 401 with invalid token', async (t) => {
   });
 
   assert.strictEqual(res.statusCode, 401);
+});
+
+test('POST /auth/login — 429 after 10 attempts within a minute', async (t) => {
+  const app = await build(t);
+
+  const statuses: number[] = [];
+  for (let i = 0; i < 11; i++) {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { login: ADMIN_LOGIN, password: 'wrong' },
+    });
+    statuses.push(res.statusCode);
+  }
+
+  assert.deepStrictEqual(statuses.slice(0, 10), Array(10).fill(401));
+  assert.strictEqual(statuses[10], 429);
 });

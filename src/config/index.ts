@@ -1,3 +1,7 @@
+const EXAMPLE_ADMIN_PASSWORDS = new Set(['admin', 'change-me-in-production']);
+
+const adminPassword = process.env.ADMIN_PASSWORD || 'admin';
+
 export const config = {
   server: {
     host: process.env.HOST || '0.0.0.0',
@@ -15,7 +19,8 @@ export const config = {
 
   admin: {
     login: process.env.ADMIN_LOGIN || 'admin',
-    password: process.env.ADMIN_PASSWORD || 'admin',
+    password: adminPassword,
+    usesExamplePassword: EXAMPLE_ADMIN_PASSWORDS.has(adminPassword),
   },
 
   jwt: {
