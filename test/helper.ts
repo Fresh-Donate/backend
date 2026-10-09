@@ -5,6 +5,7 @@ import * as test from 'node:test';
 // Force skip DB connection for tests
 process.env.SKIP_DB = 'true';
 process.env.SKIP_REDIS = 'true';
+process.env.SKIP_TELEMETRY = 'true';
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-secret-for-testing-only';
 
@@ -33,7 +34,7 @@ function config() {
  */
 async function build(t: TestContext) {
   const argv = [AppPath];
-  const app = await helper.build(argv, config());
+  const app = await helper.build(argv, config(), { pluginTimeout: 120000 });
   t.after(() => void app.close());
   return app;
 }

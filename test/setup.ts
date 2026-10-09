@@ -2,6 +2,7 @@
 // Ensures consistent environment regardless of test file entry point
 process.env.SKIP_DB = 'true';
 process.env.SKIP_REDIS = 'true';
+process.env.SKIP_TELEMETRY = 'true';
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-secret-for-testing-only';
 
