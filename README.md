@@ -13,11 +13,11 @@ FreshDonate is a self‑hosted donation system for Minecraft servers. It lets yo
 
 The platform is split into four repositories:
 
-| Repository | Role |
-| --- | --- |
-| **fresh-donate-backend** *(this repo)* | Fastify API, payments, webhooks, delivery queue |
-| [fresh-donate-shop](https://github.com/Fresh-Donate/shop) | Public storefront for players (Nuxt) |
-| [fresh-donate-panel](https://github.com/Fresh-Donate/panel) | Admin panel for owners (Nuxt) |
+| Repository                                                                 | Role                                             |
+|----------------------------------------------------------------------------|--------------------------------------------------|
+| **fresh-donate-backend** *(this repo)*                                     | Fastify API, payments, webhooks, delivery queue  |
+| [fresh-donate-shop](https://github.com/Fresh-Donate/shop)                  | Public storefront for players (Nuxt)             |
+| [fresh-donate-panel](https://github.com/Fresh-Donate/panel)                | Admin panel for owners (Nuxt)                    |
 | [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) | Minecraft plugin that delivers purchases in‑game |
 
 ## Role of this repository
@@ -75,18 +75,20 @@ docker compose up -d --build
 
 All configuration is read from environment variables (see `src/config/index.ts`):
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `HOST` / `PORT` | `0.0.0.0` / `3001` | HTTP bind address |
-| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `fresh_donate` / `postgres` / `postgres` | PostgreSQL connection |
-| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / *(empty)* | Redis connection |
-| `ADMIN_LOGIN` / `ADMIN_PASSWORD` | `admin` / `admin` | Initial admin credentials (change in prod) |
-| `JWT_SECRET` / `JWT_EXPIRES_IN` | `change-me...` / `7d` | JWT signing |
-| `CORS_ORIGIN` | `http://localhost:3000,http://localhost:3002` | Comma‑separated allowed origins |
-| `RATE_LIMIT_MAX` / `RATE_LIMIT_TIMEWINDOW` | `100` / `60000` | Global rate limit |
-| `PAYMENT_RETURN_URL` | `http://localhost:3002/payment/success` | Where gateways redirect the player |
-| `WEBHOOK_BASE_URL` | `http://localhost:3001` | Public backend URL used in gateway webhooks |
-| `SKIP_DB` / `SKIP_REDIS` | `false` | Skip external deps (used by tests) |
+| Variable                                                      | Default                                                         | Description                                                                                                                                       |
+|---------------------------------------------------------------|-----------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `HOST` / `PORT`                                               | `0.0.0.0` / `3001`                                              | HTTP bind address                                                                                                                                 |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `fresh_donate` / `postgres` / `postgres` | PostgreSQL connection                                                                                                                             |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD`                | `localhost` / `6379` / *(empty)*                                | Redis connection                                                                                                                                  |
+| `ADMIN_LOGIN` / `ADMIN_PASSWORD`                              | `admin` / `admin`                                               | Initial admin credentials (change in prod)                                                                                                        |
+| `JWT_SECRET` / `JWT_EXPIRES_IN`                               | *(generated, stored in DB)* / `7d`                              | JWT signing. Empty or the `.env.example` value means a random secret is generated on first start and kept in the `settings` table                 |
+| `CORS_ORIGIN`                                                 | `http://localhost:3000,http://localhost:3002`                   | Comma‑separated allowed origins                                                                                                                   |
+| `RATE_LIMIT_MAX` / `RATE_LIMIT_TIMEWINDOW`                    | `100` / `60000`                                                 | Global rate limit                                                                                                                                 |
+| `TRUSTED_PROXIES`                                             | private ranges                                                  | Proxies whose `X-Forwarded-For` is trusted when resolving the client IP                                                                           |
+| `<PROVIDER>_SKIP_SIGNATURE_CHECK`                             | `false`                                                         | `WATA`, `TEBEX`, `CRYPTOBOT`, `ROBOKASSA`: accept webhooks without a valid signature. Local debugging only, `NODE_ENV` no longer turns checks off |
+| `PAYMENT_RETURN_URL`                                          | `http://localhost:3002/payment/success`                         | Where gateways redirect the player                                                                                                                |
+| `WEBHOOK_BASE_URL`                                            | `http://localhost:3001`                                         | Public backend URL used in gateway webhooks                                                                                                       |
+| `SKIP_DB` / `SKIP_REDIS`                                      | `false`                                                         | Skip external deps (used by tests)                                                                                                                |
 
 ## Project structure
 
@@ -104,13 +106,13 @@ test/          node:test suites (unit + route‑level)
 
 ## Scripts
 
-| Script | What it does |
-| --- | --- |
-| `npm run dev` | Build + watch + run with hot reload |
-| `npm start` | Production start (after `build:ts`) |
-| `npm run build:ts` | Compile TypeScript to `dist/` |
-| `npm run test` | Build, compile tests, run with `c8` coverage |
-| `npm run lint` / `lint:fix` | ESLint |
+| Script                      | What it does                                 |
+|-----------------------------|----------------------------------------------|
+| `npm run dev`               | Build + watch + run with hot reload          |
+| `npm start`                 | Production start (after `build:ts`)          |
+| `npm run build:ts`          | Compile TypeScript to `dist/`                |
+| `npm run test`              | Build, compile tests, run with `c8` coverage |
+| `npm run lint` / `lint:fix` | ESLint                                       |
 
 ## Related repositories
 
