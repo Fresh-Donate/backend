@@ -6,6 +6,8 @@ import { ValidationError } from '@/core';
 import type { PaymentStatus } from '@/models/payment.model';
 import type { PaymentDto } from '@/types';
 
+const CHECKOUT_RATE_LIMIT = { max: 20, timeWindow: 60000 };
+
 const checkoutResponseSchema = {
   201: {
     type: 'object' as const,
@@ -41,6 +43,7 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       count?: number;
     };
   }>('/', {
+    config: { rateLimit: CHECKOUT_RATE_LIMIT },
     schema: {
       body: {
         type: 'object' as const,
@@ -62,9 +65,7 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       response: checkoutResponseSchema,
     },
   }, async (request, reply) => {
-    const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
-    const customerIp = forwardedFor || request.ip || '';
-    const payment = await service.create({ ...request.body, customerIp });
+    const payment = await service.create({ ...request.body, customerIp: request.ip });
     return reply.code(201).send(toCheckoutResponse(payment));
   });
 
@@ -76,6 +77,7 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       paymentOptionId: string;
     };
   }>('/cart', {
+    config: { rateLimit: CHECKOUT_RATE_LIMIT },
     schema: {
       body: {
         type: 'object' as const,
@@ -107,9 +109,7 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       response: checkoutResponseSchema,
     },
   }, async (request, reply) => {
-    const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
-    const customerIp = forwardedFor || request.ip || '';
-    const payment = await service.createCart({ ...request.body, customerIp });
+    const payment = await service.createCart({ ...request.body, customerIp: request.ip });
     return reply.code(201).send(toCheckoutResponse(payment));
   });
 

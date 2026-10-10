@@ -123,3 +123,24 @@ test('GET /payment-options — returns only fields the shop renders', async (t) 
     { id: 'opt1', name: 'Card', icon: 'i-card', redirectUrl: null },
   ]);
 });
+
+test('POST /payments — passes the resolved client ip, not a raw X-Forwarded-For, and limits checkouts per ip', async (t) => {
+  const create = t.mock.method(PaymentService.prototype, 'create', async () => fullPayment);
+  const app = await build(t);
+
+  const statuses: number[] = [];
+  for (let i = 0; i < 21; i++) {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/payments',
+      remoteAddress: '203.0.113.7',
+      headers: { 'x-forwarded-for': '1.2.3.4' },
+      payload: { productId: 'p1', nickname: 'Steve', email: 'steve@example.com', paymentOptionId: 'opt1' },
+    });
+    statuses.push(res.statusCode);
+  }
+
+  assert.strictEqual((create.mock.calls[0]!.arguments[0] as { customerIp: string }).customerIp, '203.0.113.7');
+  assert.deepStrictEqual(statuses.slice(0, 20), Array(20).fill(201));
+  assert.strictEqual(statuses[20], 429);
+});

@@ -26,3 +26,11 @@ test('GET /health — returns ok status with timestamp', async (t) => {
   // Must be a valid ISO date
   assert.ok(!isNaN(Date.parse(body.timestamp)));
 });
+
+test('GET /health — reports the client ip the backend resolved', async (t) => {
+  const app = await build(t);
+
+  const res = await app.inject({ url: '/health', remoteAddress: '203.0.113.9' });
+
+  assert.strictEqual(JSON.parse(res.payload).ip, '203.0.113.9');
+});
