@@ -22,6 +22,7 @@ import {
 import { NotFoundError, ValidationError, PaymentError } from '@/core';
 import { Op, fn, col, literal, QueryTypes, type WhereOptions } from 'sequelize';
 import { mergedMeta } from '@/utils/payment-meta';
+import { buildFunnel, RETURN_WINDOW_MS, type FunnelOrder } from '@/utils/funnel';
 import { isUuid } from '@/utils/uuid';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
@@ -132,19 +133,6 @@ function getCartCacheKey(nickname: string, items: { productId: string; count: nu
 }
 
 const MAX_CART_ITEMS = 20;
-
-const FUNNEL_BUCKETS = {
-  created: 'TRUE',
-  paid: 'paid_at IS NOT NULL',
-  delivered: `(status = 'delivered' OR (status = 'refunded' AND delivered_at IS NOT NULL))`,
-  awaitingPayment: `status = 'pending'`,
-  expired: `status = 'expired'`,
-  declined: `(status = 'failed' AND paid_at IS NULL)`,
-  awaitingDelivery: `status = 'paid'`,
-  deliveryFailed: `(status = 'failed' AND paid_at IS NOT NULL)`,
-  refundedBeforeDelivery: `(status = 'refunded' AND delivered_at IS NULL)`,
-  refunded: `status = 'refunded'`,
-} as const;
 
 const PAYABLE: WhereOptions = {
   [Op.or]: [
@@ -1807,22 +1795,16 @@ export class PaymentService {
   }
 
   async getFunnel(options: { from: string; to: string }): Promise<StatsFunnel> {
-    const where = { createdAt: { [Op.gte]: new Date(options.from), [Op.lte]: new Date(options.to) } };
-    const bucketAttributes = Object.entries(FUNNEL_BUCKETS).map(
-      ([key, cond]) => [literal(`COUNT(*) FILTER (WHERE ${cond})`), key] as [ReturnType<typeof literal>, string],
-    );
+    const from = new Date(options.from);
+    const to = new Date(options.to);
 
+    type OrderRow = Pick<Payment, 'customerNickname' | 'providerId' | 'status' | 'createdAt' | 'paidAt' | 'deliveredAt'>;
     type ReasonRow = { reason: string; count: string };
-    type ProviderRow = { providerId: string | null; created: string; paid: string; delivered: string };
 
-    const [totals, reasonRows, providerRows] = (await Promise.all([
-      Payment.findOne({
-        attributes: [
-          ...bucketAttributes,
-          [literal(`percentile_cont(0.5) WITHIN GROUP (ORDER BY GREATEST(0, EXTRACT(EPOCH FROM (paid_at - created_at)))) FILTER (WHERE ${FUNNEL_BUCKETS.paid})`), 'toPay'],
-          [literal(`percentile_cont(0.5) WITHIN GROUP (ORDER BY GREATEST(0, EXTRACT(EPOCH FROM (delivered_at - paid_at)))) FILTER (WHERE ${FUNNEL_BUCKETS.delivered} AND paid_at IS NOT NULL)`), 'toDeliver'],
-        ],
-        where,
+    const [orderRows, reasonRows] = (await Promise.all([
+      Payment.findAll({
+        attributes: ['customerNickname', 'providerId', 'status', 'createdAt', 'paidAt', 'deliveredAt'],
+        where: { createdAt: { [Op.gte]: from, [Op.lte]: new Date(to.getTime() + RETURN_WINDOW_MS) } },
         raw: true,
       }),
       Payment.findAll({
@@ -1830,51 +1812,26 @@ export class PaymentService {
           [literal(`COALESCE(meta->>'cancelReason', 'unknown')`), 'reason'],
           [fn('COUNT', col('id')), 'count'],
         ],
-        where: { ...where, [Op.and]: [literal(FUNNEL_BUCKETS.declined)] },
+        where: { createdAt: { [Op.gte]: from, [Op.lte]: to }, status: 'failed', paidAt: null },
         group: [literal(`COALESCE(meta->>'cancelReason', 'unknown')`)] as any,
         order: [[literal('"count"'), 'DESC']] as any,
         limit: 6,
         raw: true,
       }),
-      Payment.findAll({
-        attributes: [
-          'providerId',
-          [literal('COUNT(*)'), 'created'],
-          [literal(`COUNT(*) FILTER (WHERE ${FUNNEL_BUCKETS.paid})`), 'paid'],
-          [literal(`COUNT(*) FILTER (WHERE ${FUNNEL_BUCKETS.delivered})`), 'delivered'],
-        ],
-        where,
-        group: ['providerId'],
-        raw: true,
-      }),
-    ])) as unknown as [Record<string, string | number | null> | null, ReasonRow[], ProviderRow[]];
+    ])) as unknown as [OrderRow[], ReasonRow[]];
 
-    const bucket = (key: keyof typeof FUNNEL_BUCKETS): number => Number(totals?.[key]) || 0;
-    const median = (value: string | number | null | undefined): number | null =>
-      value === null || value === undefined ? null : Math.round(Number(value));
+    const orders: FunnelOrder[] = orderRows.map((o) => ({
+      nickname: o.customerNickname,
+      providerId: o.providerId,
+      status: o.status,
+      createdAt: new Date(o.createdAt),
+      paidAt: o.paidAt ? new Date(o.paidAt) : null,
+      deliveredAt: o.deliveredAt ? new Date(o.deliveredAt) : null,
+    }));
 
     return {
-      created: bucket('created'),
-      paid: bucket('paid'),
-      delivered: bucket('delivered'),
-      awaitingPayment: bucket('awaitingPayment'),
-      expired: bucket('expired'),
-      declined: bucket('declined'),
-      awaitingDelivery: bucket('awaitingDelivery'),
-      deliveryFailed: bucket('deliveryFailed'),
-      refundedBeforeDelivery: bucket('refundedBeforeDelivery'),
-      refunded: bucket('refunded'),
+      ...buildFunnel(orders, to),
       declineReasons: reasonRows.map((r) => ({ reason: r.reason, count: Number(r.count) || 0 })),
-      providers: providerRows
-        .map((p) => ({
-          providerId: p.providerId,
-          created: Number(p.created) || 0,
-          paid: Number(p.paid) || 0,
-          delivered: Number(p.delivered) || 0,
-        }))
-        .sort((a, b) => b.created - a.created),
-      medianSecondsToPay: median(totals?.toPay),
-      medianSecondsToDeliver: median(totals?.toDeliver),
     };
   }
 }
