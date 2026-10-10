@@ -189,18 +189,6 @@ test('verifyWebhookSignature — returns false when sign is missing', () => {
   assert.strictEqual(gateway.verifyWebhookSignature({ uuid: 'x' }), false);
 });
 
-test('isValidWebhookIp — accepts Heleket IP range 31.133.220.x', () => {
-  assert.strictEqual(HeleketGateway.isValidWebhookIp('31.133.220.8'), true);
-  assert.strictEqual(HeleketGateway.isValidWebhookIp('31.133.220.1'), true);
-  assert.strictEqual(HeleketGateway.isValidWebhookIp('31.133.220.255'), true);
-});
-
-test('isValidWebhookIp — rejects other IPs', () => {
-  assert.strictEqual(HeleketGateway.isValidWebhookIp('1.2.3.4'), false);
-  assert.strictEqual(HeleketGateway.isValidWebhookIp('31.133.221.8'), false);
-  assert.strictEqual(HeleketGateway.isValidWebhookIp(''), false);
-});
-
 function stubPayment(overrides: Partial<Record<string, string | number | boolean>> = {}) {
   return {
     uuid: 'uuid',

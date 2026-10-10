@@ -36,3 +36,7 @@ export interface SettingsDto {
   smtp_config: SmtpConfig;
   receipt_template: ReceiptTemplate;
 }
+
+export interface SettingsResponseDto extends Omit<SettingsDto, 'smtp_config'> {
+  smtp_config: SmtpConfig & { passwordSet: boolean };
+}

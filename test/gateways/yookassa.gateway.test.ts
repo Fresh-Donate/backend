@@ -185,21 +185,3 @@ test('createRefund — sends payment_id and amount', async () => {
   assert.strictEqual(body.amount.value, '50.00');
   assert.strictEqual(result.id, 'refund_1');
 });
-
-test('isValidWebhookIp — accepts YooKassa IPv4 ranges', () => {
-  assert.strictEqual(YooKassaGateway.isValidWebhookIp('185.71.76.1'), true);
-  assert.strictEqual(YooKassaGateway.isValidWebhookIp('185.71.77.255'), true);
-  assert.strictEqual(YooKassaGateway.isValidWebhookIp('77.75.153.100'), true);
-  assert.strictEqual(YooKassaGateway.isValidWebhookIp('77.75.156.50'), true);
-  assert.strictEqual(YooKassaGateway.isValidWebhookIp('77.75.157.1'), true);
-});
-
-test('isValidWebhookIp — accepts YooKassa IPv6 prefix', () => {
-  assert.strictEqual(YooKassaGateway.isValidWebhookIp('2a02:5180:0000:1234::1'), true);
-});
-
-test('isValidWebhookIp — rejects unknown IP', () => {
-  assert.strictEqual(YooKassaGateway.isValidWebhookIp('1.2.3.4'), false);
-  assert.strictEqual(YooKassaGateway.isValidWebhookIp('10.0.0.1'), false);
-  assert.strictEqual(YooKassaGateway.isValidWebhookIp(''), false);
-});

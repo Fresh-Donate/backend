@@ -1,11 +1,31 @@
 import fp from 'fastify-plugin';
 import fjwt, { type FastifyJWTOptions } from '@fastify/jwt';
-import { type FastifyRequest, type FastifyReply } from 'fastify';
+import { type FastifyBaseLogger, type FastifyRequest, type FastifyReply } from 'fastify';
+import { createHmac, randomBytes } from 'node:crypto';
 import { config } from '@/config';
+import { SettingsService } from '@/services/settings.service';
+
+const EXAMPLE_SECRET = 'change-me-to-a-random-secret-in-production';
+
+async function resolveSecret(log: FastifyBaseLogger): Promise<string> {
+  const fromEnv = config.jwt.secret;
+  if (fromEnv && fromEnv !== EXAMPLE_SECRET) return fromEnv;
+  if (fromEnv) {
+    log.warn('JWT_SECRET still has the example value from .env.example, ignoring it and using the secret stored in the database');
+  }
+  if (process.env.SKIP_DB === 'true') return randomBytes(48).toString('hex');
+  return new SettingsService().getJwtSecret();
+}
+
+function signingSecret(base: string): string {
+  return createHmac('sha256', base)
+    .update(`${config.admin.login}\n${config.admin.password}`)
+    .digest('hex');
+}
 
 export default fp<FastifyJWTOptions>(async (fastify) => {
   await fastify.register(fjwt, {
-    secret: config.jwt.secret,
+    secret: signingSecret(await resolveSecret(fastify.log)),
     sign: {
       expiresIn: config.jwt.expiresIn,
     },

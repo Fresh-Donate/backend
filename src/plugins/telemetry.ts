@@ -31,10 +31,15 @@ export default fp(async (fastify) => {
 
   // Defer the boot event a tick so the DB connection has a chance to come up
   // before we try to read settings.installation_id.
+  let bootTimer: NodeJS.Timeout | undefined;
   fastify.addHook('onReady', async () => {
-    setTimeout(() => {
+    bootTimer = setTimeout(() => {
       void telemetry.track('app_started');
     }, 2000);
+    bootTimer.unref();
+  });
+  fastify.addHook('onClose', async () => {
+    clearTimeout(bootTimer);
   });
 
   if (config.telemetry.disabled) {

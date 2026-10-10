@@ -50,7 +50,7 @@ export class RconService {
 
       return results;
     } finally {
-      void rcon.end();
+      rcon.end().catch(() => undefined);
     }
   }
 }

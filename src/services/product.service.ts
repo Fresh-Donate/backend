@@ -4,13 +4,19 @@ import { Promotion } from '@/models/promotion.model';
 import { Group } from '@/models/group.model';
 import { Server } from '@/models/server.model';
 import { NotFoundError } from '@/core';
-import type { ProductDto, CreateProductDto, UpdateProductDto } from '@/types';
+import type {
+  ProductDto,
+  PublicProductDto,
+  CreateProductDto,
+  UpdateProductDto,
+} from '@/types';
 import {
   activePromotionsAt,
   applyDiscount,
   totalDiscountPercent,
 } from './promotion.service';
 import { assertServersExist } from './server.service';
+import { assertGroupsExist } from './group.service';
 import { SettingsService } from './settings.service';
 
 function toDto(p: Product, now: Date = new Date()): ProductDto {
@@ -47,6 +53,24 @@ function toDto(p: Product, now: Date = new Date()): ProductDto {
   };
 }
 
+function toPublicDto(p: ProductDto): PublicProductDto {
+  return {
+    id: p.id,
+    name: p.name,
+    price: p.price,
+    currency: p.currency,
+    quantity: p.quantity,
+    description: p.description,
+    type: p.type,
+    imageUrl: p.imageUrl,
+    allowCustomCount: p.allowCustomCount,
+    activePromotions: p.activePromotions,
+    discountPercent: p.discountPercent,
+    discountedPrice: p.discountedPrice,
+    servers: p.servers,
+  };
+}
+
 const PROMOTION_INCLUDE = {
   model: Promotion,
   through: { attributes: [] as string[] },
@@ -69,7 +93,16 @@ const SERVER_INCLUDE = {
 export class ProductService {
   private settingsService = new SettingsService();
 
-  async findAll(opts: { includeHidden?: boolean } = {}): Promise<ProductDto[]> {
+  async findAll(): Promise<ProductDto[]> {
+    return this.loadAll({ includeHidden: true });
+  }
+
+  async findAllPublic(): Promise<PublicProductDto[]> {
+    const products = await this.loadAll({ includeHidden: false });
+    return products.map(toPublicDto);
+  }
+
+  private async loadAll(opts: { includeHidden: boolean }): Promise<ProductDto[]> {
     const settings = await this.settingsService.get();
     const hideUnservered = settings.multi_server_enabled && !opts.includeHidden;
 
@@ -103,6 +136,8 @@ export class ProductService {
     if (serverIds.length > 0) {
       await assertServersExist(serverIds);
     }
+    const groupIds = Array.from(new Set(data.groupIds || []));
+    await assertGroupsExist(groupIds);
 
     const forceDelivery = serverIds.length >= 2
       ? true
@@ -124,6 +159,9 @@ export class ProductService {
     if (serverIds.length > 0) {
       await (product as any).$set('servers', serverIds);
     }
+    if (groupIds.length > 0) {
+      await (product as any).$set('groups', groupIds);
+    }
 
     return toDto(await this.loadOne(product.id));
   }
@@ -139,15 +177,23 @@ export class ProductService {
         resolvedForce = true;
       }
     }
+    const groupIds = data.groupIds === undefined ? undefined : Array.from(new Set(data.groupIds));
+    if (groupIds !== undefined) {
+      await assertGroupsExist(groupIds);
+    }
 
     const patch: Record<string, unknown> = { ...data };
     delete patch.serverIds;
+    delete patch.groupIds;
     if (resolvedForce !== undefined) patch.forceDelivery = resolvedForce;
 
     await product.update(patch);
 
     if (data.serverIds !== undefined) {
       await (product as any).$set('servers', data.serverIds);
+    }
+    if (groupIds !== undefined) {
+      await (product as any).$set('groups', groupIds);
     }
 
     return toDto(await this.loadOne(id));
@@ -163,6 +209,7 @@ export class ProductService {
     const source = await this.loadOne(id);
 
     const sourceServerIds = (source.servers || []).map((s) => s.id);
+    const sourceGroupIds = (source.groups || []).map((g) => g.id);
     const product = await Product.create({
       name: `${source.name} (копия)`,
       price: source.price,
@@ -178,6 +225,9 @@ export class ProductService {
 
     if (sourceServerIds.length > 0) {
       await (product as any).$set('servers', sourceServerIds);
+    }
+    if (sourceGroupIds.length > 0) {
+      await (product as any).$set('groups', sourceGroupIds);
     }
 
     return toDto(await this.loadOne(product.id));

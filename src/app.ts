@@ -9,6 +9,7 @@ export interface AppOptions extends FastifyServerOptions, Partial<AutoloadPlugin
 
 const options: AppOptions = {
   trustProxy: config.trustedProxies,
+  pluginTimeout: config.server.pluginTimeout,
 };
 
 const app: FastifyPluginAsync<AppOptions> = async (fastify, opts): Promise<void> => {

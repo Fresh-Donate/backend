@@ -15,7 +15,7 @@ import {
   type CurrencyRates,
   type SupportedCurrency,
 } from '@/utils/currency';
-import type { SettingsDto, SmtpConfig, ReceiptTemplate } from '@/types';
+import type { SettingsDto, SettingsResponseDto, SmtpConfig, ReceiptTemplate } from '@/types';
 import { MIN_AMOUNT_LOWER, MIN_AMOUNT_UPPER } from '@/types/payment-provider';
 
 function generateToken(): string {
@@ -81,13 +81,15 @@ function normalizeSmtpPatch(patch: Partial<SmtpConfig> | undefined, current: Smt
   if (patch === undefined) return undefined;
   const port = patch.port !== undefined ? Number(patch.port) : current.port;
   const safePort = Number.isFinite(port) && port > 0 && port < 65536 ? Math.floor(port) : current.port;
+  const user = typeof patch.user === 'string' ? patch.user.slice(0, 256) : current.user;
+  const password = typeof patch.password === 'string' && patch.password.trim() ? patch.password.slice(0, 512) : current.password;
   return {
     enabled: typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled,
     host: typeof patch.host === 'string' ? patch.host.trim().slice(0, 256) : current.host,
     port: safePort,
     secure: typeof patch.secure === 'boolean' ? patch.secure : current.secure,
-    user: typeof patch.user === 'string' ? patch.user.slice(0, 256) : current.user,
-    password: typeof patch.password === 'string' ? patch.password.slice(0, 512) : current.password,
+    user,
+    password: !user ? '' : password,
     fromEmail: typeof patch.fromEmail === 'string' ? patch.fromEmail.trim().slice(0, 256) : current.fromEmail,
     fromName: typeof patch.fromName === 'string' ? patch.fromName.trim().slice(0, 128) : current.fromName,
   };
@@ -120,51 +122,67 @@ function toDto(s: Settings): SettingsDto {
   };
 }
 
+export function hideSecrets(dto: SettingsDto): SettingsResponseDto {
+  return {
+    ...dto,
+    smtp_config: { ...dto.smtp_config, password: '', passwordSet: Boolean(dto.smtp_config.password) },
+  };
+}
+
+async function findOrCreateSettings(): Promise<Settings> {
+  const [settings] = await Settings.findOrCreate({
+    where: {},
+    defaults: {
+      demo_payments: false,
+      delivery_method: 'rcon',
+      rcon_config: { host: '', port: 25575, password: '' },
+      plugin_config: { token: generateToken() },
+      base_currency: DEFAULT_BASE_CURRENCY,
+      currency_rates: defaultRatesFor(DEFAULT_BASE_CURRENCY),
+      telemetry_enabled: true,
+      installation_id: generateInstallationId(),
+      smtp_config: DEFAULT_SMTP_CONFIG,
+      receipt_template: DEFAULT_RECEIPT_TEMPLATE,
+    },
+  });
+
+  if (!settings.installation_id) {
+    await settings.update({ installation_id: generateInstallationId() });
+  }
+
+  return settings;
+}
+
+const CACHE_TTL_MS = 5000;
+let cached: { dto: SettingsDto; expiresAt: number } | null = null;
+let cacheVersion = 0;
+
 export class SettingsService {
   async get(): Promise<SettingsDto> {
-    const [settings] = await Settings.findOrCreate({
-      where: {},
-      defaults: {
-        demo_payments: false,
-        delivery_method: 'rcon',
-        rcon_config: { host: '', port: 25575, password: '' },
-        plugin_config: { token: generateToken() },
-        base_currency: DEFAULT_BASE_CURRENCY,
-        currency_rates: defaultRatesFor(DEFAULT_BASE_CURRENCY),
-        telemetry_enabled: true,
-        installation_id: generateInstallationId(),
-        smtp_config: DEFAULT_SMTP_CONFIG,
-        receipt_template: DEFAULT_RECEIPT_TEMPLATE,
-      },
-    });
-
-    if (!settings.installation_id) {
-      await settings.update({ installation_id: generateInstallationId() });
+    if (cached && cached.expiresAt > Date.now()) return cached.dto;
+    const version = cacheVersion;
+    const dto = toDto(await findOrCreateSettings());
+    if (version === cacheVersion) {
+      cached = { dto, expiresAt: Date.now() + CACHE_TTL_MS };
     }
+    return dto;
+  }
 
-    return toDto(settings);
+  async getJwtSecret(): Promise<string> {
+    const settings = await findOrCreateSettings();
+    if (settings.jwt_secret) return settings.jwt_secret;
+
+    await Settings.update(
+      { jwt_secret: crypto.randomBytes(48).toString('hex') },
+      { where: { id: settings.id, jwt_secret: null } },
+    );
+    await settings.reload();
+    if (!settings.jwt_secret) throw new Error('Failed to persist the JWT secret');
+    return settings.jwt_secret;
   }
 
   async update(data: Partial<SettingsDto>): Promise<SettingsDto> {
-    const [settings] = await Settings.findOrCreate({
-      where: {},
-      defaults: {
-        demo_payments: false,
-        delivery_method: 'rcon',
-        rcon_config: { host: '', port: 25575, password: '' },
-        plugin_config: { token: generateToken() },
-        base_currency: DEFAULT_BASE_CURRENCY,
-        currency_rates: defaultRatesFor(DEFAULT_BASE_CURRENCY),
-        telemetry_enabled: true,
-        installation_id: generateInstallationId(),
-        smtp_config: DEFAULT_SMTP_CONFIG,
-        receipt_template: DEFAULT_RECEIPT_TEMPLATE,
-      },
-    });
-
-    if (!settings.installation_id) {
-      await settings.update({ installation_id: generateInstallationId() });
-    }
+    const settings = await findOrCreateSettings();
 
     // Multi-server only works with the plugin delivery method (RCON has no
     // per-server routing). Block toggling either knob into an inconsistent
@@ -209,8 +227,11 @@ export class SettingsService {
     else delete patch.receipt_template;
 
     delete patch.installation_id;
+    delete (patch as Record<string, unknown>).jwt_secret;
 
     await settings.update(patch);
+    cacheVersion++;
+    cached = null;
 
     if (baseChanged) {
       await rebaseProviderMinAmounts(currentBase, nextBase, ratesBeforeUpdate);

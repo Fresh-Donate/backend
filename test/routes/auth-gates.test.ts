@@ -23,9 +23,11 @@ const PROTECTED: Case[] = [
   { method: 'DELETE', url: '/payment-options/some-id' },
 
   { method: 'POST', url: '/payments/some-id/confirm' },
-  { method: 'POST', url: '/payments/some-id/retry-delivery' },
+  { method: 'POST', url: '/payments/some-id/force-delivery' },
 
   // GET endpoints that require admin auth
+  { method: 'GET', url: '/products/all' },
+  { method: 'GET', url: '/products/some-id' },
   { method: 'GET', url: '/customers' },
   { method: 'GET', url: '/customers/some-id' },
   { method: 'GET', url: '/customers/some-id/payments' },

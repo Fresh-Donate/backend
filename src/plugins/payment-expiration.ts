@@ -7,6 +7,8 @@ const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 // then every SWEEP_INTERVAL_MS. unref() so this timer can't keep the event
 // loop alive on its own.
 export default fp(async (fastify) => {
+  if (process.env.SKIP_DB === 'true') return;
+
   const service = new PaymentExpirationService();
 
   async function runSweep() {

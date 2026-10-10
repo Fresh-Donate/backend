@@ -11,9 +11,14 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 const authRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
+  if (config.admin.usesExamplePassword) {
+    fastify.log.warn('ADMIN_PASSWORD is not set or still has an example value, set your own in .env');
+  }
+
   fastify.post<{
     Body: { login: string; password: string };
   }>('/login', {
+    config: { rateLimit: { max: 10, timeWindow: 60000 } },
     schema: {
       body: {
         type: 'object',
@@ -50,7 +55,9 @@ const authRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   fastify.get('/me', {
     onRequest: [fastify.authenticate],
   }, async (request) => {
-    return { user: request.user };
+    const warnings: string[] = [];
+    if (config.admin.usesExamplePassword) warnings.push('example_admin_password');
+    return { user: request.user, warnings };
   });
 };
 

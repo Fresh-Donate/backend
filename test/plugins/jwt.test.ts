@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import * as assert from 'node:assert';
 import Fastify from 'fastify';
 import jwtPlugin from '../../src/plugins/jwt';
+import { config } from '../../src/config';
 
 async function buildApp() {
   const app = Fastify();
@@ -76,4 +77,24 @@ test('jwt plugin — rejects token with tampered signature', async () => {
   });
   assert.strictEqual(res.statusCode, 401);
   await app.close();
+});
+
+test('jwt plugin — changing the admin password invalidates tokens issued before', async () => {
+  const before = await buildApp();
+  const token = before.jwt.sign({ id: 'admin', login: 'admin', role: 'admin' });
+  await before.close();
+
+  const original = config.admin.password;
+  (config.admin as { password: string }).password = `${original}-changed`;
+  try {
+    const after = await buildApp();
+    const res = await after.inject({
+      url: '/protected',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    assert.strictEqual(res.statusCode, 401);
+    await after.close();
+  } finally {
+    (config.admin as { password: string }).password = original;
+  }
 });

@@ -4,6 +4,30 @@ import { DeliveryService } from '@/services/delivery.service';
 import { EmailService } from '@/services/email.service';
 import { ValidationError } from '@/core';
 import type { PaymentStatus } from '@/models/payment.model';
+import type { PaymentDto } from '@/types';
+
+const CHECKOUT_RATE_LIMIT = { max: 20, timeWindow: 60000 };
+
+const checkoutResponseSchema = {
+  201: {
+    type: 'object' as const,
+    properties: {
+      id: { type: 'string' as const },
+      status: { type: 'string' as const },
+      externalPaymentUrl: { type: ['string', 'null'] as const },
+      itemsCount: { type: 'integer' as const },
+    },
+  },
+};
+
+function toCheckoutResponse(payment: PaymentDto) {
+  return {
+    id: payment.id,
+    status: payment.status,
+    externalPaymentUrl: payment.externalPaymentUrl,
+    itemsCount: payment.itemsCount,
+  };
+}
 
 const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentService();
@@ -19,6 +43,7 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       count?: number;
     };
   }>('/', {
+    config: { rateLimit: CHECKOUT_RATE_LIMIT },
     schema: {
       body: {
         type: 'object' as const,
@@ -37,12 +62,11 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
           paymentOptionId: { type: 'string' as const },
         },
       },
+      response: checkoutResponseSchema,
     },
   }, async (request, reply) => {
-    const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
-    const customerIp = forwardedFor || request.ip || '';
-    const payment = await service.create({ ...request.body, customerIp });
-    return reply.code(201).send(payment);
+    const payment = await service.create({ ...request.body, customerIp: request.ip });
+    return reply.code(201).send(toCheckoutResponse(payment));
   });
 
   fastify.post<{
@@ -53,6 +77,7 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       paymentOptionId: string;
     };
   }>('/cart', {
+    config: { rateLimit: CHECKOUT_RATE_LIMIT },
     schema: {
       body: {
         type: 'object' as const,
@@ -81,12 +106,11 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
           paymentOptionId: { type: 'string' as const },
         },
       },
+      response: checkoutResponseSchema,
     },
   }, async (request, reply) => {
-    const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
-    const customerIp = forwardedFor || request.ip || '';
-    const payment = await service.createCart({ ...request.body, customerIp });
-    return reply.code(201).send(payment);
+    const payment = await service.createCart({ ...request.body, customerIp: request.ip });
+    return reply.code(201).send(toCheckoutResponse(payment));
   });
 
   fastify.post<{
@@ -185,13 +209,13 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return service.confirmPayment(request.params.id);
   });
 
-  fastify.post<{ Params: { id: string } }>('/:id/retry-delivery', {
+  fastify.post<{ Params: { id: string } }>('/:id/force-delivery', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
-    await deliveryService.retryDelivery(request.params.id);
-    const payment = await service.findById(request.params.id);
-    if (!payment) return reply.code(404).send({ error: 'Payment not found' });
-    return payment;
+    const existing = await service.findById(request.params.id);
+    if (!existing) return reply.code(404).send({ error: 'Payment not found' });
+    await deliveryService.force(existing.id);
+    return service.findById(existing.id);
   });
 
   fastify.post<{ Params: { id: string } }>('/:id/resend-receipt', {

@@ -128,7 +128,7 @@ export class TebexGateway {
       // of "request 404".
       if (status === 404 && responseTitle === 'Invalid Username provided') {
         throw new PaymentError(
-          `Tebex не принимает ник "${params.username}" - он не найден в Mojang. Tebex работает только с премиум-никами Minecraft. Проверьте написание ника или выберите другой способ оплаты.`,
+          `Ник "${params.username}" не найден в Mojang, а Tebex принимает только лицензионные ники. Проверьте ник или выберите другой способ оплаты.`,
           'TEBEX_INVALID_USERNAME',
         );
       }

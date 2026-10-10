@@ -1,7 +1,12 @@
+const EXAMPLE_ADMIN_PASSWORDS = new Set(['admin', 'change-me-in-production']);
+
+const adminPassword = process.env.ADMIN_PASSWORD || 'admin';
+
 export const config = {
   server: {
     host: process.env.HOST || '0.0.0.0',
     port: parseInt(process.env.PORT || '3001', 10),
+    pluginTimeout: parseInt(process.env.PLUGIN_TIMEOUT || '30000', 10),
   },
 
   database: {
@@ -14,22 +19,17 @@ export const config = {
 
   admin: {
     login: process.env.ADMIN_LOGIN || 'admin',
-    password: process.env.ADMIN_PASSWORD || 'admin',
+    password: adminPassword,
+    usesExamplePassword: EXAMPLE_ADMIN_PASSWORDS.has(adminPassword),
   },
 
   jwt: {
-    secret: process.env.JWT_SECRET || 'change-me-to-a-random-secret-in-production',
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+    secret: process.env.JWT_SECRET || null,
+    expiresIn: process.env.JWT_EXPIRES_IN || '24h',
   },
 
   cors: {
     origin: (process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:3002').split(','),
-  },
-
-  redis: {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379', 10),
-    password: process.env.REDIS_PASSWORD || '',
   },
 
   rateLimit: {
@@ -54,8 +54,8 @@ export const config = {
   },
 
   telemetry: {
-    host: process.env.APTABASE_HOST || 'https://telemetry.fd.zaralx.ru',
-    appKey: process.env.APTABASE_APP_KEY || 'A-SH-9656128816',
+    host: process.env.APTABASE_HOST || 'https://telemetry.zaralx.ru',
+    appKey: process.env.APTABASE_APP_KEY || 'A-SH-6436156094',
     disabled: process.env.APTABASE_DISABLED === 'true' || process.env.SKIP_TELEMETRY === 'true',
   },
 } as const;

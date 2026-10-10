@@ -3,7 +3,7 @@
 > REST API и ядро платежей/доставки платформы FreshDonate.
 
 Часть проекта **FreshDonate** - open‑source платформы донатов для Minecraft‑серверов.
-См. также: [Магазин](https://github.com/Fresh-Donate/shop) · [Админ‑панель](https://github.com/Fresh-Donate/panel) · [Minecraft‑плагин](https://github.com/Fresh-Donate/fresh-donate-plugin) · [English README](README.md)
+См. также: [Магазин](https://github.com/Fresh-Donate/shop) · [Админ‑панель](https://github.com/Fresh-Donate/panel) · [Minecraft‑плагин](https://github.com/Fresh-Donate/plugin) · [English README](README.md)
 
 ---
 
@@ -13,12 +13,12 @@ FreshDonate - самохостимая система приёма донато�
 
 Платформа разделена на четыре репозитория:
 
-| Репозиторий | Роль |
-| --- | --- |
-| **fresh-donate-backend** *(этот)* | Fastify API, платежи, вебхуки, очередь доставки |
-| [fresh-donate-shop](https://github.com/Fresh-Donate/shop) | Публичная витрина для игроков (Nuxt) |
-| [fresh-donate-panel](https://github.com/Fresh-Donate/panel) | Админка для владельца (Nuxt) |
-| [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) | Плагин Minecraft, выдающий покупки в игре |
+| Репозиторий                                                                | Роль                                            |
+|----------------------------------------------------------------------------|-------------------------------------------------|
+| **fresh-donate-backend** *(этот)*                                          | Fastify API, платежи, вебхуки, очередь доставки |
+| [fresh-donate-shop](https://github.com/Fresh-Donate/shop)                  | Публичная витрина для игроков (Nuxt)            |
+| [fresh-donate-panel](https://github.com/Fresh-Donate/panel)                | Админка для владельца (Nuxt)                    |
+| [fresh-donate-plugin](https://github.com/Fresh-Donate/plugin) | Плагин Minecraft, выдающий покупки в игре       |
 
 ## Роль этого репозитория
 
@@ -34,7 +34,6 @@ FreshDonate - самохостимая система приёма донато�
 
 - **Fastify 5** (TypeScript) + autoload плагинов/роутов
 - **PostgreSQL 17** через **Sequelize 6** (sequelize‑typescript)
-- **Redis 7** для rate‑limit и коротких кэшей
 - **JWT** для авторизации, **bcrypt** для хеширования пароля админа
 - **axios** для запросов во внешние шлюзы
 - **node:test** + **c8** для тестов и покрытия
@@ -43,8 +42,7 @@ FreshDonate - самохостимая система приёма донато�
 
 - Node.js 20+
 - PostgreSQL 14+ (рекомендуется 17)
-- Redis 6+ (в dev‑режиме можно отключить: `SKIP_REDIS=true`)
-- Для доставки: запущенный [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) **или** RCON‑доступ к серверу
+- Для доставки: запущенный [fresh-donate-plugin](https://github.com/Fresh-Donate/plugin) **или** RCON‑доступ к серверу
 
 ## Быстрый старт (dev)
 
@@ -54,7 +52,7 @@ npm install
 npm run dev
 ```
 
-API поднимется на `http://localhost:3001`. Схема БД синхронизируется автоматически при старте (`sequelize.sync({ alter: true })`).
+API поднимется на `http://localhost:3001`. Изменения схемы применяются при старте миграциями из `src/config/migrations.ts`; новые таблицы и колонки из моделей добавляются автоматически, ничего не удаляется и не изменяется.
 
 ## Production‑сборка
 
@@ -65,28 +63,31 @@ npm start               # запуск fastify-cli на dist/app.js
 
 ## Docker
 
-В репозитории есть `Dockerfile` и `docker-compose.yml`, которые поднимут Postgres + Redis + бекенд одной командой:
+В репозитории есть `Dockerfile` и `docker-compose.yml`, которые поднимут Postgres + бекенд одной командой:
 
 ```bash
 docker compose up -d --build
 ```
 
+Redis больше не используется. На уже установленном сервере контейнер `redis` и переменные `REDIS_*` можно оставить, они просто игнорируются; удалить контейнер можно командой `docker compose up -d --remove-orphans`.
+
 ## Конфигурация
 
 Все настройки читаются из переменных окружения (см. `src/config/index.ts`):
 
-| Переменная | По умолчанию | Описание |
-| --- | --- | --- |
-| `HOST` / `PORT` | `0.0.0.0` / `3001` | Адрес HTTP‑сервера |
-| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `fresh_donate` / `postgres` / `postgres` | Подключение к PostgreSQL |
-| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / *(пусто)* | Подключение к Redis |
-| `ADMIN_LOGIN` / `ADMIN_PASSWORD` | `admin` / `admin` | Стартовые учётные данные админа (смени на проде!) |
-| `JWT_SECRET` / `JWT_EXPIRES_IN` | `change-me...` / `7d` | Параметры JWT |
-| `CORS_ORIGIN` | `http://localhost:3000,http://localhost:3002` | Список разрешённых origin через запятую |
-| `RATE_LIMIT_MAX` / `RATE_LIMIT_TIMEWINDOW` | `100` / `60000` | Глобальный rate‑limit |
-| `PAYMENT_RETURN_URL` | `http://localhost:3002/payment/success` | Куда редиректит шлюз игрока после оплаты |
-| `WEBHOOK_BASE_URL` | `http://localhost:3001` | Публичный URL бекенда для вебхуков шлюзов |
-| `SKIP_DB` / `SKIP_REDIS` | `false` | Отключить внешние зависимости (используется тестами) |
+| Переменная                                                    | По умолчанию                                                    | Описание                                                                                                                                                 |
+|---------------------------------------------------------------|-----------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `HOST` / `PORT`                                               | `0.0.0.0` / `3001`                                              | Адрес HTTP‑сервера                                                                                                                                       |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `fresh_donate` / `postgres` / `postgres` | Подключение к PostgreSQL                                                                                                                                 |
+| `ADMIN_LOGIN` / `ADMIN_PASSWORD`                              | `admin` / `admin`                                               | Стартовые учётные данные админа (смени на проде!)                                                                                                        |
+| `JWT_SECRET` / `JWT_EXPIRES_IN`                               | *(генерируется, хранится в БД)* / `24h`                         | Параметры JWT. Если пусто или стоит значение из `.env.example`, секрет создаётся при первом запуске и хранится в таблице `settings`. Смена `ADMIN_LOGIN` или `ADMIN_PASSWORD` завершает все сессии |
+| `CORS_ORIGIN`                                                 | `http://localhost:3000,http://localhost:3002`                   | Список разрешённых origin через запятую                                                                                                                  |
+| `RATE_LIMIT_MAX` / `RATE_LIMIT_TIMEWINDOW`                    | `100` / `60000`                                                 | Глобальный rate‑limit                                                                                                                                    |
+| `TRUSTED_PROXIES`                                             | приватные сети                                                  | Прокси, чьему `X-Forwarded-For` доверяем при определении IP клиента. Значение по умолчанию подходит для прокси в docker-сети (Coolify/Traefik, nginx в compose). `GET /health` возвращает `ip`, который видит бекенд: там должен быть ваш адрес, а не адрес прокси. За Cloudflare добавьте его диапазоны сюда и в доверенные IP прокси |
+| `<PROVIDER>_SKIP_SIGNATURE_CHECK`                             | `false`                                                         | `WATA`, `TEBEX`, `CRYPTOBOT`, `ROBOKASSA`: принимать вебхуки без валидной подписи. Только для локальной отладки, `NODE_ENV` больше не отключает проверки |
+| `PAYMENT_RETURN_URL`                                          | `http://localhost:3002/payment/success`                         | Куда редиректит шлюз игрока после оплаты                                                                                                                 |
+| `WEBHOOK_BASE_URL`                                            | `http://localhost:3001`                                         | Публичный URL бекенда для вебхуков шлюзов                                                                                                                |
+| `SKIP_DB`                                                     | `false`                                                         | Отключить внешние зависимости (используется тестами)                                                                                                     |
 
 ## Структура проекта
 
@@ -96,7 +97,7 @@ src/
   core/        базовые repository/service/controller, общие ошибки
   gateways/    HTTP‑клиенты для YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot
   models/      модели Sequelize
-  plugins/     плагины Fastify (jwt, cors, redis, rate-limit, error-handler)
+  plugins/     плагины Fastify (jwt, cors, rate-limit, error-handler)
   routes/      auth, products, payments, customers, stats, webhooks, plugin
   services/    бизнес‑логика (платежи, доставка, rcon, настройки, ...)
 test/          тесты на node:test (unit + route‑level)
@@ -104,19 +105,19 @@ test/          тесты на node:test (unit + route‑level)
 
 ## Скрипты
 
-| Скрипт | Что делает |
-| --- | --- |
-| `npm run dev` | Сборка + watch + hot reload |
-| `npm start` | Production‑запуск (после `build:ts`) |
-| `npm run build:ts` | Компиляция TypeScript в `dist/` |
-| `npm run test` | Сборка, компиляция тестов, запуск с покрытием `c8` |
-| `npm run lint` / `lint:fix` | ESLint |
+| Скрипт                      | Что делает                                         |
+|-----------------------------|----------------------------------------------------|
+| `npm run dev`               | Сборка + watch + hot reload                        |
+| `npm start`                 | Production‑запуск (после `build:ts`)               |
+| `npm run build:ts`          | Компиляция TypeScript в `dist/`                    |
+| `npm run test`              | Сборка, компиляция тестов, запуск с покрытием `c8` |
+| `npm run lint` / `lint:fix` | ESLint                                             |
 
 ## Связанные репозитории
 
 - [fresh-donate-shop](https://github.com/Fresh-Donate/shop) - публичная витрина
 - [fresh-donate-panel](https://github.com/Fresh-Donate/panel) - админ‑панель
-- [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) - плагин доставки для Minecraft
+- [fresh-donate-plugin](https://github.com/Fresh-Donate/plugin) - плагин доставки для Minecraft
 
 ## Лицензия
 

@@ -70,6 +70,19 @@ test('POST /products — 400 when required field missing', async (t) => {
   assert.strictEqual(res.statusCode, 400);
 });
 
+test('POST /products — 400 when groupIds contains a non-uuid', async (t) => {
+  const app = await build(t);
+  const token = await loginAndGetToken(app);
+
+  const res = await app.inject({
+    method: 'POST',
+    url: '/products',
+    headers: { authorization: `Bearer ${token}` },
+    payload: { name: 'Sword', price: 10, currency: 'RUB', quantity: 1, type: 'item', allowCustomCount: false, groupIds: ['nope'] },
+  });
+  assert.strictEqual(res.statusCode, 400);
+});
+
 test('POST /products — 400 when name exceeds 128 chars', async (t) => {
   const app = await build(t);
   const token = await loginAndGetToken(app);

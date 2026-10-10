@@ -6,6 +6,7 @@ import { SettingsService } from './settings.service';
 import { ShopSettingsService } from './shop-settings.service';
 import type { SmtpConfig, ReceiptTemplate } from '@/types';
 import { ValidationError } from '@/core';
+import { patchPaymentMeta, removePaymentMetaKey } from '@/utils/payment-meta';
 
 const PROVIDER_NAMES: Record<string, string> = {
   yookassa: 'ЮKassa',
@@ -252,14 +253,7 @@ export class EmailService {
     try {
       await this.sendRendered(payment.customerEmail, subject, html, settings.smtp_config);
 
-      await payment.update({
-        meta: {
-          ...payment.meta,
-          confirmationEmailSentAt: new Date().toISOString(),
-        },
-      });
-      payment.changed('meta', true);
-      await payment.save();
+      await patchPaymentMeta(payment.id, { confirmationEmailSentAt: new Date().toISOString() });
 
       console.log(`Email: receipt sent for payment ${payment.id} to ${payment.customerEmail}`);
       return { sent: true };
@@ -276,11 +270,7 @@ export class EmailService {
     if (!payment.customerEmail) throw new ValidationError('Payment has no email');
 
     if (payment.meta?.confirmationEmailSentAt) {
-      const newMeta = { ...payment.meta };
-      delete newMeta.confirmationEmailSentAt;
-      await payment.update({ meta: newMeta });
-      payment.changed('meta', true);
-      await payment.save();
+      await removePaymentMetaKey(payment.id, 'confirmationEmailSentAt');
     }
 
     return this.sendPurchaseConfirmation(paymentId);

@@ -90,8 +90,4 @@ export class HeleketGateway {
 
     return receivedSign === expectedSign;
   }
-
-  static isValidWebhookIp(ip: string): boolean {
-    return ip === '31.133.220.8' || ip.startsWith('31.133.220.');
-  }
 }

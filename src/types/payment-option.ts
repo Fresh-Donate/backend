@@ -8,6 +8,8 @@ export interface PaymentOptionDto {
   enabled: boolean;
 }
 
+export type PublicPaymentOptionDto = Pick<PaymentOptionDto, 'id' | 'name' | 'icon' | 'redirectUrl'>;
+
 export interface CreatePaymentOptionDto {
   name: string;
   icon: string;

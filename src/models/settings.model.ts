@@ -34,13 +34,14 @@ interface SettingsAttributes {
   installation_id: string;
   smtp_config: SmtpConfig;
   receipt_template: ReceiptTemplate;
+  jwt_secret: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 type SettingsCreationAttributes = Optional<
   SettingsAttributes,
-  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'multi_server_enabled' | 'base_currency' | 'currency_rates' | 'telemetry_enabled' | 'installation_id' | 'smtp_config' | 'receipt_template' | 'createdAt' | 'updatedAt'
+  'id' | 'demo_payments' | 'delivery_method' | 'rcon_config' | 'plugin_config' | 'multi_server_enabled' | 'base_currency' | 'currency_rates' | 'telemetry_enabled' | 'installation_id' | 'smtp_config' | 'receipt_template' | 'jwt_secret' | 'createdAt' | 'updatedAt'
 >;
 
 export const DEFAULT_SMTP_CONFIG: SmtpConfig = {
@@ -74,8 +75,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplate = {
       <td style="padding:24px 28px;">
         <p style="margin:0 0 16px;font-size:15px;line-height:1.5;">
           Привет, <strong>{nickname}</strong>! Мы получили вашу оплату.
-          Это письмо - подтверждение покупки. Сохраните его - при обращении в поддержку
-          сообщите номер заказа ниже.
+          При обращении в поддержку сообщите номер заказа ниже.
         </p>
 
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:16px 0;border-collapse:collapse;">
@@ -168,4 +168,7 @@ export class Settings extends BaseModel<SettingsAttributes, SettingsCreationAttr
 
   @Column(DataType.JSONB)
   declare receipt_template: ReceiptTemplate;
+
+  @Column(DataType.STRING(128))
+  declare jwt_secret: string | null;
 }

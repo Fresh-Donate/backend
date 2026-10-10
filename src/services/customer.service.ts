@@ -6,7 +6,30 @@ import type { CustomerDto, CustomerCurrencyStats } from '@/types';
 
 const COUNTED_STATUSES = ['paid', 'delivered'];
 
-async function statsByNickname(nicknames: string[]): Promise<Map<string, CustomerCurrencyStats[]>> {
+export interface CustomerDateRange {
+  from?: Date;
+  to?: Date;
+}
+
+function paidAtFilter(range?: CustomerDateRange): Record<symbol, Date> | undefined {
+  if (!range?.from && !range?.to) return undefined;
+  const filter: any = {};
+  if (range.from) filter[Op.gte] = range.from;
+  if (range.to) filter[Op.lte] = range.to;
+  return filter;
+}
+
+function baseWhere(range?: CustomerDateRange): any {
+  const where: any = { status: { [Op.in]: COUNTED_STATUSES } };
+  const paidAt = paidAtFilter(range);
+  if (paidAt) where.paidAt = paidAt;
+  return where;
+}
+
+async function statsByNickname(
+  nicknames: string[],
+  range?: CustomerDateRange,
+): Promise<Map<string, CustomerCurrencyStats[]>> {
   const map = new Map<string, CustomerCurrencyStats[]>();
   if (nicknames.length === 0) return map;
 
@@ -18,8 +41,8 @@ async function statsByNickname(nicknames: string[]): Promise<Map<string, Custome
       [fn('COUNT', literal('*')), 'purchaseCount'],
     ],
     where: {
+      ...baseWhere(range),
       customerNickname: { [Op.in]: nicknames },
-      status: { [Op.in]: COUNTED_STATUSES },
     },
     group: ['customer_nickname', 'currency'],
     raw: true,
@@ -42,14 +65,17 @@ async function statsByNickname(nicknames: string[]): Promise<Map<string, Custome
   return map;
 }
 
-async function emailByNickname(nicknames: string[]): Promise<Map<string, string>> {
+async function emailByNickname(
+  nicknames: string[],
+  range?: CustomerDateRange,
+): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   if (nicknames.length === 0) return map;
 
   const rows = await Payment.findAll({
     where: {
+      ...baseWhere(range),
       customerNickname: { [Op.in]: nicknames },
-      status: { [Op.in]: COUNTED_STATUSES },
     },
     attributes: ['customerNickname', 'customerEmail'],
     order: [['created_at', 'DESC']],
@@ -78,13 +104,16 @@ export class CustomerService {
     offset?: number;
     sortBy?: 'nickname' | 'email' | 'createdAt' | 'purchaseCount' | 'totalSpent';
     sortOrder?: 'asc' | 'desc';
+    from?: Date;
+    to?: Date;
   }): Promise<{ items: CustomerDto[]; total: number }> {
     const limit = options?.limit || 50;
     const offset = options?.offset || 0;
     const sortBy = options?.sortBy ?? 'createdAt';
     const direction = options?.sortOrder === 'asc' ? 'ASC' : 'DESC';
+    const range: CustomerDateRange = { from: options?.from, to: options?.to };
 
-    const where: any = { status: { [Op.in]: COUNTED_STATUSES } };
+    const where: any = baseWhere(range);
     if (options?.search) {
       where[Op.or] = [
         { customerNickname: { [Op.iLike]: `%${options.search}%` } },
@@ -136,8 +165,8 @@ export class CustomerService {
     const total = Number(totalRows[0]?.count ?? 0);
     const nicknames = rows.map((r) => r.nickname);
     const [statsMap, emailMap] = await Promise.all([
-      statsByNickname(nicknames),
-      emailByNickname(nicknames),
+      statsByNickname(nicknames, range),
+      emailByNickname(nicknames, range),
     ]);
 
     return {
@@ -153,11 +182,11 @@ export class CustomerService {
     };
   }
 
-  async findById(nickname: string): Promise<CustomerDto | null> {
+  async findById(nickname: string, range?: CustomerDateRange): Promise<CustomerDto | null> {
     const rows = await Payment.findAll({
       where: {
+        ...baseWhere(range),
         customerNickname: nickname,
-        status: { [Op.in]: COUNTED_STATUSES },
       },
       attributes: [
         [col('customer_nickname'), 'nickname'],
@@ -172,8 +201,8 @@ export class CustomerService {
     if (!row) return null;
 
     const [statsMap, emailMap] = await Promise.all([
-      statsByNickname([nickname]),
-      emailByNickname([nickname]),
+      statsByNickname([nickname], range),
+      emailByNickname([nickname], range),
     ]);
 
     return {
@@ -186,9 +215,9 @@ export class CustomerService {
     };
   }
 
-  async getCount(): Promise<number> {
+  async getCount(range?: CustomerDateRange): Promise<number> {
     const rows = await Payment.findAll({
-      where: { status: { [Op.in]: COUNTED_STATUSES } },
+      where: baseWhere(range),
       attributes: [[fn('COUNT', fn('DISTINCT', col('customer_nickname'))), 'count']],
       raw: true,
     }) as unknown as Array<{ count: string }>;

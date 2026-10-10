@@ -17,7 +17,7 @@ const DEFAULT_PROVIDERS: ProviderDefinition[] = [
   {
     providerId: 'yookassa',
     name: 'ЮKassa',
-    description: 'Приём платежей для РФ: банковские карты, СБП, ЮMoney, SberPay, T-Pay',
+    description: 'Карты РФ, СБП, ЮMoney, SberPay, T-Pay',
     icon: 'i-lucide-credit-card',
     credentials: { shopId: '', secretKey: '' },
     providerConfig: {},
@@ -27,7 +27,7 @@ const DEFAULT_PROVIDERS: ProviderDefinition[] = [
   {
     providerId: 'heleket',
     name: 'Heleket',
-    description: 'Криптовалютные платежи: BTC, ETH, USDT и другие',
+    description: 'Криптовалюта: BTC, ETH, USDT и другие',
     icon: 'i-lucide-bitcoin',
     credentials: { apiKey: '', merchantId: '' },
     providerConfig: {},
@@ -37,7 +37,7 @@ const DEFAULT_PROVIDERS: ProviderDefinition[] = [
   {
     providerId: 'cryptobot',
     name: 'CryptoBot',
-    description: 'Криптоплатежи через Telegram @CryptoBot: USDT, TON, BTC, ETH и другие. Покупатель оплачивает в крипте, вы выставляете счёт в фиате.',
+    description: 'Криптоплатежи через Telegram: USDT, TON, BTC, ETH и другие',
     icon: 'i-lucide-bot',
     credentials: { apiToken: '' },
     providerConfig: {},
@@ -47,7 +47,7 @@ const DEFAULT_PROVIDERS: ProviderDefinition[] = [
   {
     providerId: 'wata',
     name: 'Wata',
-    description: 'Приём платежей: банковские карты, СБП. Поддерживает песочницу.',
+    description: 'Карты, СБП',
     icon: 'i-lucide-wallet',
     credentials: { apiKey: '' },
     providerConfig: {},
@@ -57,7 +57,7 @@ const DEFAULT_PROVIDERS: ProviderDefinition[] = [
   {
     providerId: 'robokassa',
     name: 'Robokassa',
-    description: 'Приём платежей для РФ через Robokassa: банковские карты, СБП, электронные кошельки. Поддерживает тестовый режим.',
+    description: 'Карты, СБП, электронные кошельки',
     icon: 'i-lucide-receipt',
     credentials: { merchantLogin: '', password1: '', password2: '' },
     providerConfig: { hashAlgorithm: 'sha256' },
@@ -67,7 +67,7 @@ const DEFAULT_PROVIDERS: ProviderDefinition[] = [
   {
     providerId: 'tebex',
     name: 'Tebex',
-    description: 'Tebex Headless API. Принимает платежи в валюте Tebex-аккаунта (USD или EUR), требует базовой проверки личности и заведения 6 coin-пакетов в Tebex Dashboard (0.01 / 0.1 / 1 / 10 / 100 / 1000).',
+    description: 'Карты и кошельки по всему миру, USD или EUR',
     icon: 'i-lucide-gamepad-2',
     credentials: { webstoreToken: '', privateKey: '', webhookSecret: '' },
     providerConfig: {
@@ -85,7 +85,24 @@ const DEFAULT_PROVIDERS: ProviderDefinition[] = [
   },
 ];
 
+const PUBLIC_CREDENTIALS = new Set(['shopId', 'merchantId', 'merchantLogin']);
+
+function isSecretCredential(key: string): boolean {
+  return !PUBLIC_CREDENTIALS.has(key);
+}
+
 function toDto(p: PaymentProvider): PaymentProviderDto {
+  const credentials: Record<string, string> = {};
+  const secretCredentials: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(p.credentials || {})) {
+    if (isSecretCredential(key)) {
+      credentials[key] = '';
+      secretCredentials[key] = Boolean(value);
+    } else {
+      credentials[key] = value;
+    }
+  }
+
   return {
     id: p.id,
     providerId: p.providerId,
@@ -94,7 +111,8 @@ function toDto(p: PaymentProvider): PaymentProviderDto {
     icon: p.icon,
     enabled: p.enabled,
     testMode: p.testMode,
-    credentials: p.credentials,
+    credentials,
+    secretCredentials,
     providerConfig: p.providerConfig || {},
     commissionPercent: Number(p.commissionPercent),
     commissionRule: p.commissionRule,
@@ -162,9 +180,26 @@ export class PaymentProviderService {
       throw new NotFoundError(`Payment provider "${providerId}" not found`);
     }
 
-    await provider.update(data);
+    const { credentials, ...rest } = data;
+    await provider.update({
+      ...rest,
+      ...(credentials && { credentials: mergeCredentials(provider.credentials || {}, credentials) }),
+    });
     return toDto(provider);
   }
+}
+
+function mergeCredentials(
+  current: Record<string, string>,
+  incoming: Record<string, string>,
+): Record<string, string> {
+  const result = { ...current };
+  for (const [key, value] of Object.entries(incoming)) {
+    if (!(key in current)) continue;
+    if (isSecretCredential(key) && !value.trim()) continue;
+    result[key] = value;
+  }
+  return result;
 }
 
 function mergeProviderConfig(

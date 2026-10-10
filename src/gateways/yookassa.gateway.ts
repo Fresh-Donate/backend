@@ -103,18 +103,4 @@ export class YooKassaGateway {
       throw new PaymentError(`YooKassa createRefund failed: ${msg}`, 'YOOKASSA_REFUND_ERROR');
     }
   }
-
-  // YooKassa webhooks come from a fixed set of IPs (no signing) -
-  // see https://yookassa.ru/developers/using-api/webhooks
-  static isValidWebhookIp(ip: string): boolean {
-    const allowedCidrs = [
-      '185.71.76.',
-      '185.71.77.',
-      '77.75.153.',
-      '77.75.156.',
-      '77.75.157.',
-      '2a02:5180:',
-    ];
-    return allowedCidrs.some((cidr) => ip.startsWith(cidr));
-  }
 }

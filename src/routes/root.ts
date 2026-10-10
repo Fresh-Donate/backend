@@ -30,8 +30,8 @@ const root: FastifyPluginAsync = async (fastify): Promise<void> => {
     };
   });
 
-  fastify.get('/health', async () => {
-    return { status: 'ok', timestamp: new Date().toISOString() };
+  fastify.get('/health', async (request) => {
+    return { status: 'ok', timestamp: new Date().toISOString(), ip: request.ip };
   });
 };
 

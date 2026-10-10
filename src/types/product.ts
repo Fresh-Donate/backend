@@ -28,6 +28,12 @@ export interface ProductDto {
   updatedAt: Date;
 }
 
+export type PublicProductDto = Pick<
+  ProductDto,
+  'id' | 'name' | 'price' | 'currency' | 'quantity' | 'description' | 'type' | 'imageUrl'
+  | 'allowCustomCount' | 'activePromotions' | 'discountPercent' | 'discountedPrice' | 'servers'
+>;
+
 export interface CreateProductDto {
   name: string;
   price: number;
@@ -40,6 +46,7 @@ export interface CreateProductDto {
   allowCustomCount: boolean;
   forceDelivery?: boolean;
   serverIds?: string[];
+  groupIds?: string[];
 }
 
 export interface UpdateProductDto {
@@ -54,4 +61,5 @@ export interface UpdateProductDto {
   allowCustomCount?: boolean;
   forceDelivery?: boolean;
   serverIds?: string[];
+  groupIds?: string[];
 }
