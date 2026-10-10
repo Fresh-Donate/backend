@@ -3,7 +3,7 @@
 > REST API и ядро платежей/доставки платформы FreshDonate.
 
 Часть проекта **FreshDonate** - open‑source платформы донатов для Minecraft‑серверов.
-См. также: [Магазин](https://github.com/Fresh-Donate/shop) · [Админ‑панель](https://github.com/Fresh-Donate/panel) · [Minecraft‑плагин](https://github.com/Fresh-Donate/fresh-donate-plugin) · [English README](README.md)
+См. также: [Магазин](https://github.com/Fresh-Donate/shop) · [Админ‑панель](https://github.com/Fresh-Donate/panel) · [Minecraft‑плагин](https://github.com/Fresh-Donate/plugin) · [English README](README.md)
 
 ---
 
@@ -18,7 +18,7 @@ FreshDonate - самохостимая система приёма донато�
 | **fresh-donate-backend** *(этот)*                                          | Fastify API, платежи, вебхуки, очередь доставки |
 | [fresh-donate-shop](https://github.com/Fresh-Donate/shop)                  | Публичная витрина для игроков (Nuxt)            |
 | [fresh-donate-panel](https://github.com/Fresh-Donate/panel)                | Админка для владельца (Nuxt)                    |
-| [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) | Плагин Minecraft, выдающий покупки в игре       |
+| [fresh-donate-plugin](https://github.com/Fresh-Donate/plugin) | Плагин Minecraft, выдающий покупки в игре       |
 
 ## Роль этого репозитория
 
@@ -42,7 +42,7 @@ FreshDonate - самохостимая система приёма донато�
 
 - Node.js 20+
 - PostgreSQL 14+ (рекомендуется 17)
-- Для доставки: запущенный [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) **или** RCON‑доступ к серверу
+- Для доставки: запущенный [fresh-donate-plugin](https://github.com/Fresh-Donate/plugin) **или** RCON‑доступ к серверу
 
 ## Быстрый старт (dev)
 
@@ -117,7 +117,7 @@ test/          тесты на node:test (unit + route‑level)
 
 - [fresh-donate-shop](https://github.com/Fresh-Donate/shop) - публичная витрина
 - [fresh-donate-panel](https://github.com/Fresh-Donate/panel) - админ‑панель
-- [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) - плагин доставки для Minecraft
+- [fresh-donate-plugin](https://github.com/Fresh-Donate/plugin) - плагин доставки для Minecraft
 
 ## Лицензия
 

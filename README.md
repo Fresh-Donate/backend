@@ -3,7 +3,7 @@
 > REST API and payment/delivery core of the FreshDonate platform.
 
 Part of the **FreshDonate** open‑source donation platform for Minecraft servers.
-See also: [Shop](https://github.com/Fresh-Donate/shop) · [Admin Panel](https://github.com/Fresh-Donate/panel) · [Minecraft Plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) · [Russian README](README.ru.md)
+See also: [Shop](https://github.com/Fresh-Donate/shop) · [Admin Panel](https://github.com/Fresh-Donate/panel) · [Minecraft Plugin](https://github.com/Fresh-Donate/plugin) · [Russian README](README.ru.md)
 
 ---
 
@@ -18,7 +18,7 @@ The platform is split into four repositories:
 | **fresh-donate-backend** *(this repo)*                                     | Fastify API, payments, webhooks, delivery queue  |
 | [fresh-donate-shop](https://github.com/Fresh-Donate/shop)                  | Public storefront for players (Nuxt)             |
 | [fresh-donate-panel](https://github.com/Fresh-Donate/panel)                | Admin panel for owners (Nuxt)                    |
-| [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) | Minecraft plugin that delivers purchases in‑game |
+| [fresh-donate-plugin](https://github.com/Fresh-Donate/plugin) | Minecraft plugin that delivers purchases in‑game |
 
 ## Role of this repository
 
@@ -42,7 +42,7 @@ The backend is the single source of truth for products, payments and customers. 
 
 - Node.js 20+
 - PostgreSQL 14+ (17 recommended)
-- For delivery: a running [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) **or** RCON access to the server
+- For delivery: a running [fresh-donate-plugin](https://github.com/Fresh-Donate/plugin) **or** RCON access to the server
 
 ## Quick start (dev)
 
@@ -117,7 +117,7 @@ test/          node:test suites (unit + route‑level)
 
 - [fresh-donate-shop](https://github.com/Fresh-Donate/shop) - public storefront
 - [fresh-donate-panel](https://github.com/Fresh-Donate/panel) - admin panel
-- [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) - Minecraft delivery plugin
+- [fresh-donate-plugin](https://github.com/Fresh-Donate/plugin) - Minecraft delivery plugin
 
 ## License
 
