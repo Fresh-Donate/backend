@@ -116,10 +116,7 @@ function toDto(p: Payment, items?: PaymentItem[]): PaymentDto {
   };
 }
 
-// Idempotency cache: the same checkout (same buyer + same basket) repeated
-// within 2 min returns the existing pending payment instead of double-charging.
-const paymentCache = new Map<string, { paymentId: string; expiresAt: number }>();
-const CACHE_TTL = 2 * 60 * 1000;
+const CHECKOUT_REUSE_MS = 2 * 60 * 1000;
 
 // Stable key for a basket: nickname + sorted (productId, count) pairs. Single
 // purchases are just a one-line basket, so they share the same scheme.
@@ -130,15 +127,6 @@ function getCartCacheKey(nickname: string, items: { productId: string; count: nu
     .join('|');
   const hash = createHash('sha1').update(normalized).digest('hex');
   return `${nickname}:${hash}`;
-}
-
-// Webhooks/confirm clear the idempotency entry by the key we stashed at
-// creation, so a finalized payment never shadows a fresh retry.
-function clearPaymentCache(payment: Payment): void {
-  const key = payment.meta?.cacheKey;
-  if (typeof key === 'string' && key) {
-    paymentCache.delete(key);
-  }
 }
 
 const MAX_CART_ITEMS = 20;
@@ -603,13 +591,22 @@ export class PaymentService {
       buyer.nickname,
       resolved.map((r) => ({ productId: r.product.id, count: r.count })),
     );
-    const cached = paymentCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      const existing = await this.findDtoById(cached.paymentId);
-      if (existing && existing.status === 'pending') {
-        return existing;
-      }
-      paymentCache.delete(cacheKey);
+    const reusable = await Payment.findOne({
+      attributes: ['id'],
+      where: {
+        customerNickname: buyer.nickname,
+        customerEmail: buyer.email,
+        paymentOptionId: buyer.paymentOptionId,
+        status: 'pending',
+        externalPaymentUrl: { [Op.ne]: null },
+        createdAt: { [Op.gte]: new Date(Date.now() - CHECKOUT_REUSE_MS) },
+        meta: { cacheKey },
+      },
+      order: [['created_at', 'DESC']],
+    });
+    if (reusable) {
+      const existing = await this.findDtoById(reusable.id);
+      if (existing) return existing;
     }
 
     const option = await PaymentOption.findByPk(buyer.paymentOptionId);
@@ -733,16 +730,17 @@ export class PaymentService {
       return result;
     }
 
-    paymentCache.set(cacheKey, {
-      paymentId: payment.id,
-      expiresAt: Date.now() + CACHE_TTL,
-    });
-
     if (provider && provider.enabled) {
       const orderLabel = opts.isCart
         ? `Заказ #${payment.id.slice(0, 8)} (${ruItemsCount(resolved.length)})`
         : first.product.name;
-      await this.createExternalPayment(payment, provider, orderLabel, buyer.customerIp);
+      try {
+        await this.createExternalPayment(payment, provider, orderLabel, buyer.customerIp);
+      } catch (err) {
+        await this.transition(payment.id, { status: 'pending' }, { status: 'failed' }, { cancelReason: 'provider_error' })
+          .catch(() => undefined);
+        throw err;
+      }
     }
 
     const result = await this.findDtoById(payment.id);
@@ -1035,7 +1033,6 @@ export class PaymentService {
       }
 
       if (!(await this.markPaid(payment, updateData))) return;
-      clearPaymentCache(payment);
 
       console.log(`YooKassa: payment ${payment.id} succeeded (external: ${externalId})`);
     } else if (object.status === 'canceled' && payment.status === 'pending') {
@@ -1044,8 +1041,6 @@ export class PaymentService {
         cancelParty: object.cancellation_details?.party || 'unknown',
       });
       if (!changed) return;
-
-      clearPaymentCache(payment);
 
       console.log(`YooKassa: payment ${payment.id} canceled (external: ${externalId})`);
     } else if (object.status === 'waiting_for_capture') {
@@ -1101,7 +1096,6 @@ export class PaymentService {
         },
       });
       if (!changed) return;
-      clearPaymentCache(payment);
 
       console.log(`Heleket: payment ${payment.id} succeeded (uuid: ${payload.uuid}, txid: ${payload.txid})`);
 
@@ -1114,8 +1108,6 @@ export class PaymentService {
         },
       });
       if (!changed) return;
-
-      clearPaymentCache(payment);
 
       console.log(`Heleket: payment ${payment.id} failed with status ${status} (uuid: ${payload.uuid})`);
     }
@@ -1167,7 +1159,6 @@ export class PaymentService {
       },
     });
     if (!changed) return;
-    clearPaymentCache(payment);
 
     console.log(
       `CryptoBot: payment ${payment.id} succeeded (invoice: ${invoice.invoice_id}, asset: ${invoice.paid_asset})`,
@@ -1221,7 +1212,6 @@ export class PaymentService {
         },
       });
       if (!changed) return;
-      clearPaymentCache(payment);
 
       console.log(`Wata: payment ${payment.id} succeeded (tx: ${payload.transactionId})`);
     } else if (status === 'Declined' && payment.status === 'pending') {
@@ -1235,8 +1225,6 @@ export class PaymentService {
         },
       });
       if (!changed) return;
-
-      clearPaymentCache(payment);
 
       console.log(`Wata: payment ${payment.id} declined (${payload.errorCode || 'unknown'})`);
     }
@@ -1298,7 +1286,6 @@ export class PaymentService {
       },
     });
     if (!changed) return true;
-    clearPaymentCache(payment);
 
     console.log(`Robokassa: payment ${payment.id} succeeded (InvId: ${payload.InvId})`);
     return true;
@@ -1363,7 +1350,6 @@ export class PaymentService {
         },
       });
       if (!changed) return;
-      clearPaymentCache(payment);
 
       console.log(`Tebex: payment ${payment.id} completed (tx: ${subject.transaction_id})`);
     } else if (type === 'payment.declined' && payment.status === 'pending') {
@@ -1375,8 +1361,6 @@ export class PaymentService {
         },
       });
       if (!changed) return;
-
-      clearPaymentCache(payment);
 
       console.log(`Tebex: payment ${payment.id} declined (${subject.decline_reason?.code || 'unknown'})`);
     } else if (type === 'payment.refunded' && (payment.status === 'paid' || payment.status === 'delivered')) {
@@ -1403,8 +1387,6 @@ export class PaymentService {
     }
 
     await payment.reload();
-
-    clearPaymentCache(payment);
 
     return toDto(payment);
   }
