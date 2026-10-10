@@ -54,7 +54,7 @@ npm install
 npm run dev
 ```
 
-API starts on `http://localhost:3001` by default. The schema is synced automatically on boot (`sequelize.sync({ alter: true })`).
+API starts on `http://localhost:3001` by default. Schema changes are applied on boot by the migrations in `src/config/migrations.ts`; new tables and columns from the models are added automatically, nothing is ever dropped or altered.
 
 ## Build / production
 
