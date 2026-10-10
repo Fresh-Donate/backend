@@ -9,6 +9,8 @@ import { PaymentProvider } from '@/models/payment-provider.model';
 import { PaymentError } from '@/core/errors';
 import type { CryptoBotWebhookUpdate, RobokassaHashAlgorithm, RobokassaWebhookPayload } from '@/types';
 
+const RETRY_LATER = 'Webhook processing failed, retry later';
+
 const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const paymentService = new PaymentService();
 
@@ -85,6 +87,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       if (error instanceof PaymentError) {
         return reply.code(503).send({ error: 'Payment status unavailable, retry later' });
       }
+      return reply.code(500).send({ error: RETRY_LATER });
     }
 
     return reply.code(200).send({ status: 'ok' });
@@ -120,6 +123,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       await paymentService.handleHeleketWebhook(payload);
     } catch (error: any) {
       request.log.error(`Heleket webhook processing error: ${error.message}`);
+      return reply.code(500).send({ error: RETRY_LATER });
     }
 
     return reply.code(200).send({ status: 'ok' });
@@ -168,6 +172,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       await paymentService.handleCryptoBotWebhook(update);
     } catch (error: any) {
       request.log.error(`CryptoBot webhook processing error: ${error.message}`);
+      return reply.code(500).send({ error: RETRY_LATER });
     }
 
     return reply.code(200).send({ status: 'ok' });
@@ -217,6 +222,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       await paymentService.handleWataWebhook(payload);
     } catch (error: any) {
       request.log.error(`Wata webhook processing error: ${error.message}`);
+      return reply.code(500).send({ error: RETRY_LATER });
     }
 
     return reply.code(200).send({ status: 'ok' });
@@ -273,6 +279,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       await paymentService.handleTebexWebhook(payload);
     } catch (error: any) {
       request.log.error(`Tebex webhook processing error: ${error.message}`);
+      return reply.code(500).send({ error: RETRY_LATER });
     }
 
     return reply.code(200).send({ id: payload.id });
@@ -324,6 +331,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       await paymentService.handleRobokassaWebhook(payload);
     } catch (error: any) {
       request.log.error(`Robokassa webhook processing error: ${error.message}`);
+      return reply.code(500).type('text/plain').send('ERROR');
     }
 
     return reply.code(200).type('text/plain').send(`OK${payload.InvId ?? ''}`);

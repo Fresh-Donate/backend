@@ -22,6 +22,7 @@ import {
 import { NotFoundError, ValidationError, PaymentError } from '@/core';
 import { Op, fn, col, literal, QueryTypes, type WhereOptions } from 'sequelize';
 import { mergedMeta } from '@/utils/payment-meta';
+import { isUuid } from '@/utils/uuid';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
@@ -1058,10 +1059,10 @@ export class PaymentService {
     const paymentId = payload.order_id || payload.uuid;
     if (!paymentId) return;
 
-    let payment = await Payment.findByPk(paymentId);
-    if (!payment) {
+    let payment = isUuid(paymentId) ? await Payment.findByPk(paymentId) : null;
+    if (!payment && payload.uuid) {
       payment = await Payment.findOne({
-        where: { externalPaymentId: payload.uuid },
+        where: { externalPaymentId: String(payload.uuid) },
       });
     }
     if (!payment) {
@@ -1127,7 +1128,7 @@ export class PaymentService {
     if (!invoice) return;
 
     let payment: Payment | null = null;
-    if (invoice.payload) {
+    if (isUuid(invoice.payload)) {
       payment = await Payment.findByPk(invoice.payload);
     }
     if (!payment) {
@@ -1183,7 +1184,7 @@ export class PaymentService {
 
     let payment: Payment | null = null;
 
-    if (payload.orderId) {
+    if (isUuid(payload.orderId)) {
       payment = await Payment.findByPk(payload.orderId);
     }
 
@@ -1251,7 +1252,7 @@ export class PaymentService {
     let payment: Payment | null = null;
 
     const shpPaymentId = payload.Shp_paymentId;
-    if (typeof shpPaymentId === 'string' && shpPaymentId) {
+    if (isUuid(shpPaymentId)) {
       payment = await Payment.findByPk(shpPaymentId);
     }
 
@@ -1320,8 +1321,8 @@ export class PaymentService {
       || subject.products?.[0]?.custom?.payment_id as string | undefined;
 
     let payment: Payment | null = null;
-    if (customPaymentId) {
-      payment = await Payment.findByPk(String(customPaymentId));
+    if (isUuid(customPaymentId)) {
+      payment = await Payment.findByPk(customPaymentId);
     }
     if (!payment && subject.transaction_id) {
       payment = await Payment.findOne({
@@ -1437,6 +1438,7 @@ export class PaymentService {
   }
 
   async findById(id: string): Promise<PaymentDto | null> {
+    if (!isUuid(id)) return null;
     const payment = await Payment.findByPk(id, {
       include: [{ model: PaymentItem, required: false }],
     });
