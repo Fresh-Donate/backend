@@ -315,11 +315,11 @@ export class PaymentService {
     payment: Payment,
     values: Record<string, unknown>,
     metaPatch?: Record<string, unknown>,
-    waitForDelivery = false,
+    opts: { waitForDelivery?: boolean } = {},
   ): Promise<boolean> {
     const changed = await this.transition(payment.id, PAYABLE, { ...values, status: 'paid' }, metaPatch);
     if (changed) {
-      await this.onPaymentPaid(payment.id, waitForDelivery);
+      await this.onPaymentPaid(payment.id, opts.waitForDelivery === true);
     }
     return changed;
   }
@@ -734,7 +734,7 @@ export class PaymentService {
     });
 
     if (settings.demo_payments) {
-      await this.markPaid(payment, { paidAt: new Date() }, { demo: true }, true);
+      await this.markPaid(payment, { paidAt: new Date() }, { demo: true }, { waitForDelivery: true });
 
       const result = await this.findDtoById(payment.id);
       if (!result) throw new Error('Payment vanished after creation');
@@ -1394,7 +1394,7 @@ export class PaymentService {
     if (!payment) throw new NotFoundError('Payment not found');
     // Allow rescuing an auto-expired payment too - useful when webhook
     // arrived late or buyer paid offline.
-    if (!(await this.markPaid(payment, { paidAt: new Date() }, undefined, true))) {
+    if (!(await this.markPaid(payment, { paidAt: new Date() }, {}, { waitForDelivery: true }))) {
       throw new ValidationError('Payment is not pending');
     }
 
