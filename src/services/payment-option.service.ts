@@ -2,6 +2,7 @@ import { PaymentOption } from '@/models/payment-option.model';
 import { NotFoundError } from '@/core';
 import type {
   PaymentOptionDto,
+  PublicPaymentOptionDto,
   CreatePaymentOptionDto,
   UpdatePaymentOptionDto,
 } from '@/types';
@@ -18,18 +19,27 @@ function toDto(o: PaymentOption): PaymentOptionDto {
   };
 }
 
+function toPublicDto(o: PaymentOption): PublicPaymentOptionDto {
+  return {
+    id: o.id,
+    name: o.name,
+    icon: o.icon,
+    redirectUrl: o.redirectUrl,
+  };
+}
+
 export class PaymentOptionService {
   async findAll(): Promise<PaymentOptionDto[]> {
     const options = await PaymentOption.findAll({ order: [['sort_order', 'ASC'], ['created_at', 'ASC']] });
     return options.map(toDto);
   }
 
-  async findEnabled(): Promise<PaymentOptionDto[]> {
+  async findEnabled(): Promise<PublicPaymentOptionDto[]> {
     const options = await PaymentOption.findAll({
       where: { enabled: true },
       order: [['sort_order', 'ASC'], ['created_at', 'ASC']],
     });
-    return options.map(toDto);
+    return options.map(toPublicDto);
   }
 
   async findById(id: string): Promise<PaymentOptionDto> {

@@ -26,6 +26,8 @@ const PROTECTED: Case[] = [
   { method: 'POST', url: '/payments/some-id/retry-delivery' },
 
   // GET endpoints that require admin auth
+  { method: 'GET', url: '/products/all' },
+  { method: 'GET', url: '/products/some-id' },
   { method: 'GET', url: '/customers' },
   { method: 'GET', url: '/customers/some-id' },
   { method: 'GET', url: '/customers/some-id/payments' },

@@ -28,6 +28,12 @@ export interface ProductDto {
   updatedAt: Date;
 }
 
+export type PublicProductDto = Pick<
+  ProductDto,
+  'id' | 'name' | 'price' | 'currency' | 'quantity' | 'description' | 'type' | 'imageUrl'
+  | 'allowCustomCount' | 'activePromotions' | 'discountPercent' | 'discountedPrice' | 'servers'
+>;
+
 export interface CreateProductDto {
   name: string;
   price: number;

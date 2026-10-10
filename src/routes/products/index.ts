@@ -19,26 +19,67 @@ const productBodySchema = {
   },
 };
 
+const publicProductSchema = {
+  type: 'object' as const,
+  properties: {
+    id: { type: 'string' as const },
+    name: { type: 'string' as const },
+    price: { type: 'number' as const },
+    currency: { type: 'string' as const },
+    quantity: { type: 'integer' as const },
+    description: { type: 'string' as const },
+    type: { type: 'string' as const },
+    imageUrl: { type: 'string' as const },
+    allowCustomCount: { type: 'boolean' as const },
+    activePromotions: {
+      type: 'array' as const,
+      items: {
+        type: 'object' as const,
+        properties: {
+          id: { type: 'string' as const },
+          name: { type: 'string' as const },
+          discountPercent: { type: 'number' as const },
+        },
+      },
+    },
+    discountPercent: { type: 'number' as const },
+    discountedPrice: { type: 'number' as const },
+    servers: {
+      type: 'array' as const,
+      items: {
+        type: 'object' as const,
+        properties: {
+          id: { type: 'string' as const },
+          name: { type: 'string' as const },
+        },
+      },
+    },
+  },
+};
+
 const productRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new ProductService();
 
-  fastify.get('/', async (request, reply) => {
-    let includeHidden = false;
-    if (request.headers.authorization) {
-      try {
-        await request.jwtVerify();
-        includeHidden = true;
-      } catch {
-        // ignore - fall through to public view
-      }
-    }
-    if (!includeHidden) {
-      reply.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
-    }
-    return service.findAll({ includeHidden });
+  fastify.get('/', {
+    schema: {
+      response: {
+        200: { type: 'array' as const, items: publicProductSchema },
+      },
+    },
+  }, async (_req, reply) => {
+    reply.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+    return service.findAllPublic();
   });
 
-  fastify.get<{ Params: { id: string } }>('/:id', async (request) => {
+  fastify.get('/all', {
+    onRequest: [fastify.authenticate],
+  }, async () => {
+    return service.findAll();
+  });
+
+  fastify.get<{ Params: { id: string } }>('/:id', {
+    onRequest: [fastify.authenticate],
+  }, async (request) => {
     return service.findById(request.params.id);
   });
 

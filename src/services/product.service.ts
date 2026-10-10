@@ -4,7 +4,12 @@ import { Promotion } from '@/models/promotion.model';
 import { Group } from '@/models/group.model';
 import { Server } from '@/models/server.model';
 import { NotFoundError } from '@/core';
-import type { ProductDto, CreateProductDto, UpdateProductDto } from '@/types';
+import type {
+  ProductDto,
+  PublicProductDto,
+  CreateProductDto,
+  UpdateProductDto,
+} from '@/types';
 import {
   activePromotionsAt,
   applyDiscount,
@@ -47,6 +52,24 @@ function toDto(p: Product, now: Date = new Date()): ProductDto {
   };
 }
 
+function toPublicDto(p: ProductDto): PublicProductDto {
+  return {
+    id: p.id,
+    name: p.name,
+    price: p.price,
+    currency: p.currency,
+    quantity: p.quantity,
+    description: p.description,
+    type: p.type,
+    imageUrl: p.imageUrl,
+    allowCustomCount: p.allowCustomCount,
+    activePromotions: p.activePromotions,
+    discountPercent: p.discountPercent,
+    discountedPrice: p.discountedPrice,
+    servers: p.servers,
+  };
+}
+
 const PROMOTION_INCLUDE = {
   model: Promotion,
   through: { attributes: [] as string[] },
@@ -69,7 +92,16 @@ const SERVER_INCLUDE = {
 export class ProductService {
   private settingsService = new SettingsService();
 
-  async findAll(opts: { includeHidden?: boolean } = {}): Promise<ProductDto[]> {
+  async findAll(): Promise<ProductDto[]> {
+    return this.loadAll({ includeHidden: true });
+  }
+
+  async findAllPublic(): Promise<PublicProductDto[]> {
+    const products = await this.loadAll({ includeHidden: false });
+    return products.map(toPublicDto);
+  }
+
+  private async loadAll(opts: { includeHidden: boolean }): Promise<ProductDto[]> {
     const settings = await this.settingsService.get();
     const hideUnservered = settings.multi_server_enabled && !opts.includeHidden;
 

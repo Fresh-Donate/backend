@@ -5,7 +5,24 @@ import type { CreatePaymentOptionDto, UpdatePaymentOptionDto } from '@/types';
 const paymentOptionRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentOptionService();
 
-  fastify.get('/', async (_req, reply) => {
+  fastify.get('/', {
+    schema: {
+      response: {
+        200: {
+          type: 'array' as const,
+          items: {
+            type: 'object' as const,
+            properties: {
+              id: { type: 'string' as const },
+              name: { type: 'string' as const },
+              icon: { type: 'string' as const },
+              redirectUrl: { type: ['string', 'null'] as const },
+            },
+          },
+        },
+      },
+    },
+  }, async (_req, reply) => {
     reply.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
     return service.findEnabled();
   });

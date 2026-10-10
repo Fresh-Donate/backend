@@ -4,6 +4,28 @@ import { DeliveryService } from '@/services/delivery.service';
 import { EmailService } from '@/services/email.service';
 import { ValidationError } from '@/core';
 import type { PaymentStatus } from '@/models/payment.model';
+import type { PaymentDto } from '@/types';
+
+const checkoutResponseSchema = {
+  201: {
+    type: 'object' as const,
+    properties: {
+      id: { type: 'string' as const },
+      status: { type: 'string' as const },
+      externalPaymentUrl: { type: ['string', 'null'] as const },
+      itemsCount: { type: 'integer' as const },
+    },
+  },
+};
+
+function toCheckoutResponse(payment: PaymentDto) {
+  return {
+    id: payment.id,
+    status: payment.status,
+    externalPaymentUrl: payment.externalPaymentUrl,
+    itemsCount: payment.itemsCount,
+  };
+}
 
 const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const service = new PaymentService();
@@ -37,12 +59,13 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
           paymentOptionId: { type: 'string' as const },
         },
       },
+      response: checkoutResponseSchema,
     },
   }, async (request, reply) => {
     const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
     const customerIp = forwardedFor || request.ip || '';
     const payment = await service.create({ ...request.body, customerIp });
-    return reply.code(201).send(payment);
+    return reply.code(201).send(toCheckoutResponse(payment));
   });
 
   fastify.post<{
@@ -81,12 +104,13 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
           paymentOptionId: { type: 'string' as const },
         },
       },
+      response: checkoutResponseSchema,
     },
   }, async (request, reply) => {
     const forwardedFor = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
     const customerIp = forwardedFor || request.ip || '';
     const payment = await service.createCart({ ...request.body, customerIp });
-    return reply.code(201).send(payment);
+    return reply.code(201).send(toCheckoutResponse(payment));
   });
 
   fastify.post<{
