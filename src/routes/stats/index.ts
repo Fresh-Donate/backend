@@ -33,6 +33,15 @@ const statsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     const { from, to, currency, tz } = request.query;
     return paymentService.getSummary({ from, to, currency, tz });
   });
+
+  fastify.get<{
+    Querystring: { from: string; to: string };
+  }>('/funnel', {
+    onRequest: [fastify.authenticate],
+  }, async (request) => {
+    const { from, to } = request.query;
+    return paymentService.getFunnel({ from, to });
+  });
 };
 
 export default statsRoutes;
