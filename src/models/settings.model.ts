@@ -75,8 +75,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplate = {
       <td style="padding:24px 28px;">
         <p style="margin:0 0 16px;font-size:15px;line-height:1.5;">
           Привет, <strong>{nickname}</strong>! Мы получили вашу оплату.
-          Это письмо - подтверждение покупки. Сохраните его - при обращении в поддержку
-          сообщите номер заказа ниже.
+          При обращении в поддержку сообщите номер заказа ниже.
         </p>
 
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:16px 0;border-collapse:collapse;">
