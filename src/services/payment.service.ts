@@ -53,6 +53,7 @@ import type {
   CryptoBotWebhookUpdate,
   CryptoBotFiat,
   StatsSummary,
+  ActivityBucket,
   YooKassaReceipt,
   YooKassaVatCode,
   YooKassaPaymentMode,
@@ -1631,7 +1632,20 @@ export class PaymentService {
     type ProviderRow = { providerId: string | null; amount: string; count: string };
     type ProductRow = { productId: string; productName: string; amount: string; count: string };
 
-    const [dailyRows, currentAgg, prevAgg, providerRows, productRows] = (await Promise.all([
+    const hourExpr = `EXTRACT(HOUR FROM paid_at AT TIME ZONE '${safeTz}')::int`;
+    const weekdayExpr = `EXTRACT(ISODOW FROM paid_at AT TIME ZONE '${safeTz}')::int`;
+    const activityQuery = (expr: string) => Payment.findAll({
+      attributes: [
+        [literal(expr), 'bucket'],
+        [fn('COALESCE', fn('SUM', literal(amountInTarget)), 0), 'amount'],
+        [fn('COUNT', col('id')), 'count'],
+      ],
+      where: currentWhere,
+      group: [literal(expr)] as any,
+      raw: true,
+    });
+
+    const [dailyRows, currentAgg, prevAgg, providerRows, productRows, hourRows, weekdayRows] = (await Promise.all([
       Payment.findAll({
         attributes: [
           [literal(dailyTrunc), 'date'],
@@ -1694,7 +1708,9 @@ export class PaymentService {
           LIMIT 10`,
         { replacements: { from: fromDate, to: toDate }, type: QueryTypes.SELECT },
       ),
-    ])) as unknown as [DailyRow[], AggRow, AggRow, ProviderRow[], ProductRow[]];
+      activityQuery(hourExpr),
+      activityQuery(weekdayExpr),
+    ])) as unknown as [DailyRow[], AggRow, AggRow, ProviderRow[], ProductRow[], ActivityRow[], ActivityRow[]];
 
     const amountByDay = new Map<string, number>();
     const commissionByDay = new Map<string, number>();
@@ -1771,8 +1787,25 @@ export class PaymentService {
         count: Number(p.count) || 0,
         amount: round2(Number(p.amount) || 0),
       })),
+      byHour: toActivityBuckets(hourRows, 24, 0),
+      byWeekday: toActivityBuckets(weekdayRows, 7, 1),
     };
   }
+}
+
+type ActivityRow = { bucket: number | string; amount: string; count: string };
+
+function toActivityBuckets(rows: ActivityRow[], size: number, offset: number): ActivityBucket[] {
+  const buckets: ActivityBucket[] = Array.from({ length: size }, () => ({ count: 0, amount: 0 }));
+  for (const row of rows) {
+    const index = Number(row.bucket) - offset;
+    if (index < 0 || index >= size) continue;
+    buckets[index] = {
+      count: Number(row.count) || 0,
+      amount: Math.round((Number(row.amount) || 0) * 100) / 100,
+    };
+  }
+  return buckets;
 }
 
 function resolveTimeZone(tz?: string): string {
