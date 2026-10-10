@@ -93,7 +93,8 @@ test('handleYooKassaWebhook — does not call the API for a payment that is alre
 
 test('handleYooKassaWebhook — a repeated "succeeded" notification does not start a second delivery', async (t) => {
   const updates = stubDb(t, 'pending');
-  const delivery = t.mock.method(DeliveryService.prototype, 'attemptDelivery', async () => {});
+  const delivery = t.mock.method(DeliveryService.prototype, 'enqueue', async () => {});
+  t.mock.method(DeliveryService.prototype, 'deliverNow', async () => {});
   t.mock.method(EmailService.prototype, 'sendPurchaseConfirmation', async () => ({ sent: false }));
   const succeeded = {
     id: 'ext-5',

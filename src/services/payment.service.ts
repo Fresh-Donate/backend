@@ -283,9 +283,19 @@ export class PaymentService {
   // Single fan-out point for "payment just transitioned to paid": fire the
   // receipt email (best-effort, never blocks) and then kick off delivery.
   // Webhooks and demo-mode all go through here so behaviour stays uniform.
-  private async onPaymentPaid(paymentId: string): Promise<void> {
+  private async onPaymentPaid(paymentId: string, waitForDelivery: boolean): Promise<void> {
     void this.emailService.sendPurchaseConfirmation(paymentId).catch(() => {});
-    await this.deliveryService.attemptDelivery(paymentId);
+    try {
+      await this.deliveryService.enqueue(paymentId);
+      const delivery = this.deliveryService.deliverNow(paymentId);
+      if (waitForDelivery) {
+        await delivery;
+      } else {
+        delivery.catch((err) => console.error(`Delivery: payment ${paymentId} failed: ${err instanceof Error ? err.message : err}`));
+      }
+    } catch (err) {
+      console.error(`Delivery: could not queue payment ${paymentId}: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   private async transition(
@@ -305,10 +315,11 @@ export class PaymentService {
     payment: Payment,
     values: Record<string, unknown>,
     metaPatch?: Record<string, unknown>,
+    waitForDelivery = false,
   ): Promise<boolean> {
     const changed = await this.transition(payment.id, PAYABLE, { ...values, status: 'paid' }, metaPatch);
     if (changed) {
-      await this.onPaymentPaid(payment.id);
+      await this.onPaymentPaid(payment.id, waitForDelivery);
     }
     return changed;
   }
@@ -723,7 +734,7 @@ export class PaymentService {
     });
 
     if (settings.demo_payments) {
-      await this.markPaid(payment, { paidAt: new Date() }, { demo: true });
+      await this.markPaid(payment, { paidAt: new Date() }, { demo: true }, true);
 
       const result = await this.findDtoById(payment.id);
       if (!result) throw new Error('Payment vanished after creation');
@@ -1372,6 +1383,7 @@ export class PaymentService {
         },
       });
       if (!changed) return;
+      await this.deliveryService.cancelPending(payment.id);
 
       console.log(`Tebex: payment ${payment.id} refunded (tx: ${subject.transaction_id})`);
     }
@@ -1382,7 +1394,7 @@ export class PaymentService {
     if (!payment) throw new NotFoundError('Payment not found');
     // Allow rescuing an auto-expired payment too - useful when webhook
     // arrived late or buyer paid offline.
-    if (!(await this.markPaid(payment, { paidAt: new Date() }))) {
+    if (!(await this.markPaid(payment, { paidAt: new Date() }, undefined, true))) {
       throw new ValidationError('Payment is not pending');
     }
 

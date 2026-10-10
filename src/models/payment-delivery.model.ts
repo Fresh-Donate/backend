@@ -18,8 +18,11 @@ export type PaymentDeliveryStatus = 'pending' | 'delivered' | 'failed';
 interface PaymentDeliveryAttributes {
   id: string;
   paymentId: string;
-  serverId: string;
+  serverId: string | null;
   status: PaymentDeliveryStatus;
+  attempts: number;
+  nextAttemptAt: Date | null;
+  requireOnline: boolean;
   deliveredAt: Date | null;
   meta: Record<string, any>;
   createdAt: Date;
@@ -28,7 +31,7 @@ interface PaymentDeliveryAttributes {
 
 type PaymentDeliveryCreationAttributes = Optional<
   PaymentDeliveryAttributes,
-  'id' | 'status' | 'deliveredAt' | 'meta' | 'createdAt' | 'updatedAt'
+  'id' | 'serverId' | 'status' | 'attempts' | 'nextAttemptAt' | 'requireOnline' | 'deliveredAt' | 'meta' | 'createdAt' | 'updatedAt'
 >;
 
 @Table({
@@ -49,11 +52,22 @@ export class PaymentDelivery extends Model<PaymentDeliveryAttributes, PaymentDel
 
   @ForeignKey(() => Server)
   @Column({ type: DataType.STRING(64), field: 'server_id' })
-  declare serverId: string;
+  declare serverId: string | null;
 
   @Default('pending')
   @Column(DataType.STRING(16))
   declare status: PaymentDeliveryStatus;
+
+  @Default(0)
+  @Column({ type: DataType.INTEGER, allowNull: false })
+  declare attempts: number;
+
+  @Column({ type: DataType.DATE, field: 'next_attempt_at' })
+  declare nextAttemptAt: Date | null;
+
+  @Default(false)
+  @Column({ type: DataType.BOOLEAN, field: 'require_online', allowNull: false })
+  declare requireOnline: boolean;
 
   @Column({ type: DataType.DATE, field: 'delivered_at' })
   declare deliveredAt: Date | null;

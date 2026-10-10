@@ -193,11 +193,54 @@ async function paymentIndexes(db: Sequelize): Promise<void> {
   `);
 }
 
+async function deliveryQueue(db: Sequelize): Promise<void> {
+  await db.query(`
+    ALTER TABLE payment_deliveries ALTER COLUMN server_id DROP NOT NULL;
+  `);
+  await db.query(`
+    ALTER TABLE payment_deliveries
+      ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMP WITH TIME ZONE NULL,
+      ADD COLUMN IF NOT EXISTS require_online BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+  await db.query(`
+    ALTER TABLE payment_deliveries ALTER COLUMN next_attempt_at SET DEFAULT NOW();
+  `);
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS payment_deliveries_payment_default_unique
+      ON payment_deliveries (payment_id) WHERE server_id IS NULL;
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS payment_deliveries_due_idx
+      ON payment_deliveries (next_attempt_at) WHERE status = 'pending';
+  `);
+  await db.query(`
+    UPDATE payment_deliveries
+       SET next_attempt_at = NOW()
+     WHERE status = 'pending' AND next_attempt_at IS NULL;
+  `);
+  await db.query(`
+    UPDATE payment_deliveries d
+       SET require_online = TRUE
+     WHERE d.status = 'pending'
+       AND EXISTS (
+         SELECT 1
+           FROM payment_items pi
+           JOIN products pr ON pr.id = pi.product_id
+           JOIN product_servers ps ON ps.product_id = pr.id AND ps.server_id = d.server_id
+          WHERE pi.payment_id = d.payment_id
+            AND pr.force_delivery = FALSE
+            AND cardinality(pr.commands) > 0
+       );
+  `);
+}
+
 const migrations: Migration[] = [
   { name: '001-customers-snapshot', up: snapshotCustomers },
   { name: '002-multi-server', up: multiServerTables },
   { name: '003-cart', up: cartTables },
   { name: '004-payment-indexes', up: paymentIndexes },
+  { name: '005-delivery-queue', up: deliveryQueue },
 ];
 
 export async function runMigrations(db: Sequelize): Promise<void> {
