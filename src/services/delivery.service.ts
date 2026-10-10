@@ -4,7 +4,7 @@ import { Payment } from '@/models/payment.model';
 import { PaymentItem } from '@/models/payment-item.model';
 import { Product } from '@/models/product.model';
 import { Server } from '@/models/server.model';
-import { PaymentDelivery } from '@/models/payment-delivery.model';
+import { PaymentDelivery, type PaymentDeliveryStatus } from '@/models/payment-delivery.model';
 import { NotFoundError } from '@/core';
 import { RconService } from './rcon.service';
 import { SettingsService } from './settings.service';
@@ -18,15 +18,16 @@ const RCON_LEASE_MS = 5 * 60 * 1000;
 const PLUGIN_LEASE_MS = 2 * 60 * 1000;
 const PLUGIN_BATCH = 50;
 const RCON_BATCH = 10;
+const RCON_ROUNDS_PER_TICK = 10;
 const HEAL_BATCH = 50;
 
-interface Order {
+export interface Order {
   payment: Payment;
   items: PaymentItem[];
   productById: Map<string, Product>;
 }
 
-interface CommandLine {
+export interface CommandLine {
   key: string;
   command: string;
 }
@@ -58,13 +59,8 @@ interface ClaimOptions {
   online?: string[];
 }
 
-function retryDelay(attempt: number): number {
-  const index = Math.min(attempt, RETRY_DELAYS_MS.length) - 1;
-  return RETRY_DELAYS_MS[index] ?? 60 * 1000;
-}
-
-function dueIn(ms: number) {
-  return literal(`NOW() + INTERVAL '${Math.round(ms / 1000)} seconds'`);
+function nowPlus(ms: number): string {
+  return `NOW() + INTERVAL '${Math.round(ms / 1000)} seconds'`;
 }
 
 async function loadOrders(paymentIds: string[]): Promise<Map<string, Order>> {
@@ -96,7 +92,7 @@ async function loadOrders(paymentIds: string[]): Promise<Map<string, Order>> {
   return orders;
 }
 
-function planFor(order: Order, serverId: string | null, done: Set<string>): Plan {
+export function planFor(order: Order, serverId: string | null, done: Set<string>): Plan {
   const lines: CommandLine[] = [];
   let requireOnline = false;
   for (const item of order.items) {
@@ -112,6 +108,20 @@ function planFor(order: Order, serverId: string | null, done: Set<string>): Plan
     });
   }
   return { lines, requireOnline };
+}
+
+export function matchReported(lines: CommandLine[], logs: CommandReport[]): string[] {
+  const keysByCommand = new Map<string, string[]>();
+  for (const line of lines) {
+    keysByCommand.set(line.command, [...(keysByCommand.get(line.command) || []), line.key]);
+  }
+  const succeeded: string[] = [];
+  for (const log of logs) {
+    if (!log.success) continue;
+    const key = keysByCommand.get(log.command)?.shift();
+    if (key) succeeded.push(key);
+  }
+  return succeeded;
 }
 
 function targetServers(order: Order): string[] {
@@ -210,7 +220,7 @@ export class DeliveryService {
     const settings = await this.settingsService.get();
     if (settings.delivery_method !== 'rcon') return;
 
-    for (let round = 0; round < 10; round++) {
+    for (let round = 0; round < RCON_ROUNDS_PER_TICK; round++) {
       const jobs = await this.claim({ serverId: null, limit: RCON_BATCH, leaseMs: RCON_LEASE_MS });
       if (jobs.length === 0) return;
       for (const job of jobs) {
@@ -270,38 +280,16 @@ export class DeliveryService {
     serverId: string | null,
     success: boolean,
     logs: CommandReport[],
-  ): Promise<{ deliveryStatus: string; paymentStatus: string | null; alreadyReported?: boolean } | null> {
+  ): Promise<PaymentDeliveryStatus | null> {
     const job = await PaymentDelivery.findOne({ where: { paymentId, serverId } });
     if (!job) return null;
+    if (job.status === 'delivered') return 'delivered';
 
-    if (job.status !== 'delivered') {
-      const order = (await loadOrders([paymentId])).get(paymentId);
-      const done = doneKeys(job);
-      const plan = order ? planFor(order, serverId, done) : { lines: [], requireOnline: false };
-
-      const keysByCommand = new Map<string, string[]>();
-      for (const line of plan.lines) {
-        keysByCommand.set(line.command, [...(keysByCommand.get(line.command) || []), line.key]);
-      }
-      const succeeded: string[] = [];
-      for (const log of logs) {
-        if (!log.success) continue;
-        const key = keysByCommand.get(log.command)?.shift();
-        if (key) succeeded.push(key);
-      }
-
-      await this.recordAttempt(job, done, succeeded, plan.lines.length, { results: logs }, success);
-    }
-
-    const [current, payment] = await Promise.all([
-      PaymentDelivery.findByPk(job.id, { attributes: ['status'] }),
-      Payment.findByPk(paymentId, { attributes: ['status'] }),
-    ]);
-    return {
-      deliveryStatus: current?.status ?? job.status,
-      paymentStatus: payment?.status ?? null,
-      ...(job.status === 'delivered' ? { alreadyReported: true } : {}),
-    };
+    const order = (await loadOrders([paymentId])).get(paymentId);
+    const done = doneKeys(job);
+    const plan = order ? planFor(order, serverId, done) : { lines: [], requireOnline: false };
+    const succeeded = matchReported(plan.lines, logs);
+    return this.recordAttempt(job, done, succeeded, plan.lines.length, { results: logs }, success);
   }
 
   async cancelPending(paymentId: string): Promise<void> {
@@ -320,7 +308,6 @@ export class DeliveryService {
     const replacements: Record<string, unknown> = {
       serverId: opts.serverId,
       limit: opts.limit,
-      lease: Math.round(opts.leaseMs / 1000),
     };
     if (opts.paymentId) {
       conditions.push('d.payment_id = :paymentId');
@@ -337,7 +324,7 @@ export class DeliveryService {
 
     const rows = await sequelize.query<{ id: string }>(
       `UPDATE payment_deliveries
-          SET next_attempt_at = NOW() + make_interval(secs => :lease), updated_at = NOW()
+          SET next_attempt_at = ${nowPlus(opts.leaseMs)}, updated_at = NOW()
         WHERE id IN (
           SELECT d.id
             FROM payment_deliveries d
@@ -390,7 +377,7 @@ export class DeliveryService {
     planned: number,
     outcome: { results?: RconResult[]; error?: string },
     reportedSuccess = false,
-  ): Promise<void> {
+  ): Promise<PaymentDeliveryStatus> {
     const doneCommands = [...done, ...succeeded];
     const attempt = job.attempts + 1;
     const complete = reportedSuccess || (!outcome.error && succeeded.length === planned);
@@ -406,7 +393,7 @@ export class DeliveryService {
 
     if (complete) {
       await this.completeJob(job, doneCommands, attempt);
-      return;
+      return 'delivered';
     }
 
     const meta = { ...job.meta, doneCommands };
@@ -416,13 +403,14 @@ export class DeliveryService {
         { where: { id: job.id } },
       );
       await this.rollUp(job.paymentId);
-      return;
+      return 'failed';
     }
 
     await PaymentDelivery.update(
-      { attempts: attempt, nextAttemptAt: dueIn(retryDelay(attempt)), meta },
+      { attempts: attempt, nextAttemptAt: literal(nowPlus(RETRY_DELAYS_MS[attempt - 1] ?? 0)), meta },
       { where: { id: job.id } },
     );
+    return 'pending';
   }
 
   private async completeJob(job: PaymentDelivery, doneCommands: string[], attempts: number): Promise<void> {
@@ -448,7 +436,12 @@ export class DeliveryService {
   private async finishPayment(paymentId: string): Promise<void> {
     await Payment.update(
       { status: 'delivered', deliveredAt: new Date() },
-      { where: { id: paymentId, status: { [Op.in]: ['paid', 'failed'] }, paidAt: { [Op.ne]: null } } },
+      {
+        where: {
+          id: paymentId,
+          [Op.or]: [{ status: 'paid' }, { status: 'failed', paidAt: { [Op.ne]: null } }],
+        },
+      },
     );
   }
 
