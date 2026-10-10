@@ -1,7 +1,7 @@
 import fp from 'fastify-plugin';
 import fjwt, { type FastifyJWTOptions } from '@fastify/jwt';
 import { type FastifyBaseLogger, type FastifyRequest, type FastifyReply } from 'fastify';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { config } from '@/config';
 import { SettingsService } from '@/services/settings.service';
 
@@ -17,9 +17,15 @@ async function resolveSecret(log: FastifyBaseLogger): Promise<string> {
   return new SettingsService().getJwtSecret();
 }
 
+function signingSecret(base: string): string {
+  return createHmac('sha256', base)
+    .update(`${config.admin.login}\n${config.admin.password}`)
+    .digest('hex');
+}
+
 export default fp<FastifyJWTOptions>(async (fastify) => {
   await fastify.register(fjwt, {
-    secret: await resolveSecret(fastify.log),
+    secret: signingSecret(await resolveSecret(fastify.log)),
     sign: {
       expiresIn: config.jwt.expiresIn,
     },
