@@ -20,7 +20,8 @@ import {
   totalDiscountPercent,
 } from './promotion.service';
 import { NotFoundError, ValidationError, PaymentError } from '@/core';
-import { Op, fn, col, literal, QueryTypes } from 'sequelize';
+import { Op, fn, col, literal, QueryTypes, type WhereOptions } from 'sequelize';
+import { mergedMeta } from '@/utils/payment-meta';
 import { YooKassaGateway } from '@/gateways/yookassa.gateway';
 import { HeleketGateway } from '@/gateways/heleket.gateway';
 import { WataGateway } from '@/gateways/wata.gateway';
@@ -140,6 +141,17 @@ function clearPaymentCache(payment: Payment): void {
 }
 
 const MAX_CART_ITEMS = 20;
+
+const PAYABLE: WhereOptions = {
+  [Op.or]: [
+    { status: { [Op.in]: ['pending', 'expired'] } },
+    { status: 'failed', paidAt: null },
+  ],
+};
+
+function isPayable(p: Payment): boolean {
+  return p.status === 'pending' || p.status === 'expired' || (p.status === 'failed' && !p.paidAt);
+}
 
 interface ResolvedItem {
   product: Product;
@@ -285,6 +297,31 @@ export class PaymentService {
   private async onPaymentPaid(paymentId: string): Promise<void> {
     void this.emailService.sendPurchaseConfirmation(paymentId).catch(() => {});
     await this.deliveryService.attemptDelivery(paymentId);
+  }
+
+  private async transition(
+    paymentId: string,
+    from: WhereOptions,
+    values: Record<string, unknown>,
+    metaPatch?: Record<string, unknown>,
+  ): Promise<boolean> {
+    const [count] = await Payment.update(
+      { ...values, ...(metaPatch ? { meta: mergedMeta(metaPatch) } : {}) },
+      { where: { [Op.and]: [{ id: paymentId }, from] } },
+    );
+    return count > 0;
+  }
+
+  private async markPaid(
+    payment: Payment,
+    values: Record<string, unknown>,
+    metaPatch?: Record<string, unknown>,
+  ): Promise<boolean> {
+    const changed = await this.transition(payment.id, PAYABLE, { ...values, status: 'paid' }, metaPatch);
+    if (changed) {
+      await this.onPaymentPaid(payment.id);
+    }
+    return changed;
   }
 
   async previewPrice(nickname: string, productId: string): Promise<UpgradeEvaluation> {
@@ -688,13 +725,7 @@ export class PaymentService {
     });
 
     if (settings.demo_payments) {
-      await payment.update({
-        status: 'paid',
-        paidAt: new Date(),
-        meta: { ...payment.meta, demo: true },
-      });
-
-      await this.onPaymentPaid(payment.id);
+      await this.markPaid(payment, { paidAt: new Date() }, { demo: true });
 
       const result = await this.findDtoById(payment.id);
       if (!result) throw new Error('Payment vanished after creation');
@@ -970,7 +1001,7 @@ export class PaymentService {
       console.warn(`YooKassa webhook: payment not found for external ID ${externalId}`);
       return;
     }
-    if (payment.status !== 'pending' && payment.status !== 'expired') return;
+    if (!isPayable(payment)) return;
 
     const provider = await PaymentProvider.findOne({ where: { providerId: 'yookassa' } });
     const { shopId, secretKey } = provider?.credentials ?? {};
@@ -982,12 +1013,11 @@ export class PaymentService {
     const gateway = new YooKassaGateway(shopId, secretKey);
     const object = await gateway.getPayment(externalId);
 
-    if (object.status === 'succeeded' && (payment.status === 'pending' || payment.status === 'expired')) {
+    if (object.status === 'succeeded') {
       const paidAmount = object.amount ? Number(object.amount.value) : Number(payment.totalAmount);
       const incomeAmount = object.income_amount ? Number(object.income_amount.value) : undefined;
 
       const updateData: Record<string, any> = {
-        status: 'paid',
         paidAt: new Date(object.captured_at || new Date()),
         totalAmount: paidAmount,
         currency: object.amount?.currency || payment.currency,
@@ -1003,25 +1033,21 @@ export class PaymentService {
         updateData.commissionPercent = realPercent;
       }
 
-      await payment.update(updateData);
-      await this.onPaymentPaid(payment.id);
+      if (!(await this.markPaid(payment, updateData))) return;
       clearPaymentCache(payment);
 
       console.log(`YooKassa: payment ${payment.id} succeeded (external: ${externalId})`);
     } else if (object.status === 'canceled' && payment.status === 'pending') {
-      await payment.update({
-        status: 'failed',
-        meta: {
-          ...payment.meta,
-          cancelReason: object.cancellation_details?.reason || 'unknown',
-          cancelParty: object.cancellation_details?.party || 'unknown',
-        },
+      const changed = await this.transition(payment.id, { status: 'pending' }, { status: 'failed' }, {
+        cancelReason: object.cancellation_details?.reason || 'unknown',
+        cancelParty: object.cancellation_details?.party || 'unknown',
       });
+      if (!changed) return;
 
       clearPaymentCache(payment);
 
       console.log(`YooKassa: payment ${payment.id} canceled (external: ${externalId})`);
-    } else if (object.status === 'waiting_for_capture' && payment.status === 'pending') {
+    } else if (object.status === 'waiting_for_capture') {
       // Auto-capture: confirm immediately so the buyer's card is actually charged.
       await gateway.capturePayment(externalId, Number(payment.totalAmount), payment.currency);
     }
@@ -1046,13 +1072,12 @@ export class PaymentService {
     const status = payload.status;
     const isFinal = payload.is_final;
 
-    if ((status === 'paid' || status === 'paid_over') && (payment.status === 'pending' || payment.status === 'expired')) {
+    if (status === 'paid' || status === 'paid_over') {
       const paidAmount = payload.payment_amount ? Number(payload.payment_amount) : Number(payment.totalAmount);
       const merchantAmount = payload.merchant_amount ? Number(payload.merchant_amount) : undefined;
       const commission = payload.commission ? Number(payload.commission) : undefined;
 
       const updateData: Record<string, any> = {
-        status: 'paid',
         paidAt: new Date(),
         currency: payload.payer_currency || payment.currency,
       };
@@ -1065,8 +1090,7 @@ export class PaymentService {
           : 0;
       }
 
-      updateData.meta = {
-        ...payment.meta,
+      const changed = await this.markPaid(payment, updateData, {
         heleket: {
           txid: payload.txid,
           network: payload.network,
@@ -1074,26 +1098,21 @@ export class PaymentService {
           from: payload.from,
           paymentAmountUsd: payload.payment_amount_usd,
         },
-      };
-
-      await payment.update(updateData);
-      await this.onPaymentPaid(payment.id);
+      });
+      if (!changed) return;
       clearPaymentCache(payment);
 
       console.log(`Heleket: payment ${payment.id} succeeded (uuid: ${payload.uuid}, txid: ${payload.txid})`);
 
     } else if (['cancel', 'fail', 'system_fail'].includes(status) && isFinal && payment.status === 'pending') {
-      await payment.update({
-        status: 'failed',
-        meta: {
-          ...payment.meta,
-          cancelReason: status,
-          heleket: {
-            uuid: payload.uuid,
-            network: payload.network,
-          },
+      const changed = await this.transition(payment.id, { status: 'pending' }, { status: 'failed' }, {
+        cancelReason: status,
+        heleket: {
+          uuid: payload.uuid,
+          network: payload.network,
         },
       });
+      if (!changed) return;
 
       clearPaymentCache(payment);
 
@@ -1124,33 +1143,29 @@ export class PaymentService {
     }
 
     if (invoice.status !== 'paid') return;
-    if (payment.status !== 'pending' && payment.status !== 'expired') return;
 
     // CryptoBot quotes fees in the paid asset. We keep our pre-charge fiat
     // total and percent and only stash the fee+asset+paid amount for analytics.
     const updateData: Record<string, any> = {
-      status: 'paid',
       paidAt: invoice.paid_at ? new Date(invoice.paid_at) : new Date(),
       externalPaymentId: String(invoice.invoice_id),
-      meta: {
-        ...payment.meta,
-        cryptobot: {
-          ...(payment.meta.cryptobot || {}),
-          invoiceId: invoice.invoice_id,
-          hash: invoice.hash,
-          paidAsset: invoice.paid_asset,
-          paidAmount: invoice.paid_amount,
-          paidFiatRate: invoice.paid_fiat_rate,
-          feeAsset: invoice.fee_asset,
-          feeAmount: invoice.fee_amount,
-          paidAnonymously: invoice.paid_anonymously,
-          comment: invoice.comment,
-        },
-      },
     };
 
-    await payment.update(updateData);
-    await this.onPaymentPaid(payment.id);
+    const changed = await this.markPaid(payment, updateData, {
+      cryptobot: {
+        ...(payment.meta.cryptobot || {}),
+        invoiceId: invoice.invoice_id,
+        hash: invoice.hash,
+        paidAsset: invoice.paid_asset,
+        paidAmount: invoice.paid_amount,
+        paidFiatRate: invoice.paid_fiat_rate,
+        feeAsset: invoice.fee_asset,
+        feeAmount: invoice.fee_amount,
+        paidAnonymously: invoice.paid_anonymously,
+        comment: invoice.comment,
+      },
+    });
+    if (!changed) return;
     clearPaymentCache(payment);
 
     console.log(
@@ -1188,44 +1203,37 @@ export class PaymentService {
       return;
     }
 
-    if (status === 'Paid' && (payment.status === 'pending' || payment.status === 'expired')) {
+    if (status === 'Paid') {
       const paidAmount = payload.amount !== undefined ? Number(payload.amount) : Number(payment.totalAmount);
 
       // Wata webhooks don't carry commission - keep our pre-charge estimate.
-      await payment.update({
-        status: 'paid',
+      const changed = await this.markPaid(payment, {
         paidAt: payload.paymentTime ? new Date(payload.paymentTime) : new Date(),
         totalAmount: paidAmount,
         currency: payload.currency || payment.currency,
         externalPaymentId: payload.transactionId || payment.externalPaymentId,
-        meta: {
-          ...payment.meta,
-          wata: {
-            ...(payment.meta.wata || {}),
-            transactionId: payload.transactionId,
-            paymentLinkId: payload.paymentLinkId,
-          },
+      }, {
+        wata: {
+          ...(payment.meta.wata || {}),
+          transactionId: payload.transactionId,
+          paymentLinkId: payload.paymentLinkId,
         },
       });
-
-      await this.onPaymentPaid(payment.id);
+      if (!changed) return;
       clearPaymentCache(payment);
 
       console.log(`Wata: payment ${payment.id} succeeded (tx: ${payload.transactionId})`);
     } else if (status === 'Declined' && payment.status === 'pending') {
-      await payment.update({
-        status: 'failed',
-        meta: {
-          ...payment.meta,
-          cancelReason: payload.errorCode || 'declined',
-          wata: {
-            ...(payment.meta.wata || {}),
-            transactionId: payload.transactionId,
-            errorCode: payload.errorCode,
-            errorDescription: payload.errorDescription,
-          },
+      const changed = await this.transition(payment.id, { status: 'pending' }, { status: 'failed' }, {
+        cancelReason: payload.errorCode || 'declined',
+        wata: {
+          ...(payment.meta.wata || {}),
+          transactionId: payload.transactionId,
+          errorCode: payload.errorCode,
+          errorDescription: payload.errorDescription,
         },
       });
+      if (!changed) return;
 
       clearPaymentCache(payment);
 
@@ -1263,15 +1271,10 @@ export class PaymentService {
       return false;
     }
 
-    if (payment.status !== 'pending' && payment.status !== 'expired') {
-      return true;
-    }
-
     const paidAmount = Number(payload.OutSum);
     const fee = payload.Fee !== undefined ? Number(payload.Fee) : undefined;
 
     const updateData: Record<string, any> = {
-      status: 'paid',
       paidAt: new Date(),
       totalAmount: Number.isFinite(paidAmount) ? paidAmount : Number(payment.totalAmount),
     };
@@ -1284,8 +1287,7 @@ export class PaymentService {
         : 0;
     }
 
-    updateData.meta = {
-      ...payment.meta,
+    const changed = await this.markPaid(payment, updateData, {
       robokassa: {
         ...(payment.meta.robokassa || {}),
         invId: payload.InvId,
@@ -1293,10 +1295,8 @@ export class PaymentService {
         incCurrLabel: payload.IncCurrLabel,
         email: payload.EMail,
       },
-    };
-
-    await payment.update(updateData);
-    await this.onPaymentPaid(payment.id);
+    });
+    if (!changed) return true;
     clearPaymentCache(payment);
 
     console.log(`Robokassa: payment ${payment.id} succeeded (InvId: ${payload.InvId})`);
@@ -1335,12 +1335,11 @@ export class PaymentService {
       return;
     }
 
-    if (type === 'payment.completed' && (payment.status === 'pending' || payment.status === 'expired')) {
+    if (type === 'payment.completed') {
       const paidAmount = subject.price_paid?.amount ?? subject.price?.amount ?? Number(payment.totalAmount);
       const gatewayFee = subject.fees?.gateway?.amount;
 
       const updateData: Record<string, any> = {
-        status: 'paid',
         paidAt: new Date(),
         totalAmount: paidAmount,
         currency: subject.price_paid?.currency || subject.price?.currency || payment.currency,
@@ -1355,48 +1354,39 @@ export class PaymentService {
           : 0;
       }
 
-      updateData.meta = {
-        ...payment.meta,
+      const changed = await this.markPaid(payment, updateData, {
         tebex: {
           transactionId: subject.transaction_id,
           paymentMethod: subject.payment_method?.name,
           customerEmail: subject.customer?.email,
         },
-      };
-
-      await payment.update(updateData);
-      await this.onPaymentPaid(payment.id);
+      });
+      if (!changed) return;
       clearPaymentCache(payment);
 
       console.log(`Tebex: payment ${payment.id} completed (tx: ${subject.transaction_id})`);
     } else if (type === 'payment.declined' && payment.status === 'pending') {
-      await payment.update({
-        status: 'failed',
-        meta: {
-          ...payment.meta,
-          cancelReason: subject.decline_reason?.code || 'declined',
-          tebex: {
-            transactionId: subject.transaction_id,
-            declineMessage: subject.decline_reason?.message,
-          },
+      const changed = await this.transition(payment.id, { status: 'pending' }, { status: 'failed' }, {
+        cancelReason: subject.decline_reason?.code || 'declined',
+        tebex: {
+          transactionId: subject.transaction_id,
+          declineMessage: subject.decline_reason?.message,
         },
       });
+      if (!changed) return;
 
       clearPaymentCache(payment);
 
       console.log(`Tebex: payment ${payment.id} declined (${subject.decline_reason?.code || 'unknown'})`);
     } else if (type === 'payment.refunded' && (payment.status === 'paid' || payment.status === 'delivered')) {
-      await payment.update({
-        status: 'refunded',
-        meta: {
-          ...payment.meta,
-          tebex: {
-            ...((payment.meta as Record<string, any>).tebex || {}),
-            refundedAt: new Date().toISOString(),
-            transactionId: subject.transaction_id,
-          },
+      const changed = await this.transition(payment.id, { status: { [Op.in]: ['paid', 'delivered'] } }, { status: 'refunded' }, {
+        tebex: {
+          ...((payment.meta as Record<string, any>).tebex || {}),
+          refundedAt: new Date().toISOString(),
+          transactionId: subject.transaction_id,
         },
       });
+      if (!changed) return;
 
       console.log(`Tebex: payment ${payment.id} refunded (tx: ${subject.transaction_id})`);
     }
@@ -1407,16 +1397,10 @@ export class PaymentService {
     if (!payment) throw new NotFoundError('Payment not found');
     // Allow rescuing an auto-expired payment too - useful when webhook
     // arrived late or buyer paid offline.
-    if (payment.status !== 'pending' && payment.status !== 'expired') {
+    if (!(await this.markPaid(payment, { paidAt: new Date() }))) {
       throw new ValidationError('Payment is not pending');
     }
 
-    await payment.update({
-      status: 'paid',
-      paidAt: new Date(),
-    });
-
-    await this.onPaymentPaid(payment.id);
     await payment.reload();
 
     clearPaymentCache(payment);
@@ -1461,7 +1445,8 @@ export class PaymentService {
     // Lazy-expire on read so /payments/:id/status flips immediately without
     // waiting for the sweeper.
     if (this.expirationService.isStale(payment)) {
-      await payment.update({ status: 'expired' });
+      await this.transition(payment.id, { status: 'pending' }, { status: 'expired' });
+      await payment.reload();
     }
 
     sortPaymentItems(payment);

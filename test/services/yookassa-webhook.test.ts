@@ -5,6 +5,8 @@ import { PaymentService } from '../../src/services/payment.service';
 import { Payment } from '../../src/models/payment.model';
 import { PaymentProvider } from '../../src/models/payment-provider.model';
 import { PaymentError } from '../../src/core/errors';
+import { DeliveryService } from '../../src/services/delivery.service';
+import { EmailService } from '../../src/services/email.service';
 
 const BASE = 'https://api.yookassa.ru';
 
@@ -17,14 +19,18 @@ function stubDb(t: TestContext, status: string) {
   const payment = {
     id: 'payment-1',
     status,
+    paidAt: null,
     totalAmount: 100,
     currency: 'RUB',
     meta: {},
-    update: async (data: Record<string, unknown>) => {
-      updates.push(data);
-    },
   };
   t.mock.method(Payment, 'findOne', async () => payment);
+  t.mock.method(Payment, 'update', async (data: Record<string, unknown>) => {
+    if (payment.status !== 'pending' && payment.status !== 'expired') return [0];
+    updates.push(data);
+    payment.status = String(data.status);
+    return [1];
+  });
   t.mock.method(PaymentProvider, 'findOne', async () => ({
     credentials: { shopId: 'shop', secretKey: 'secret' },
   }));
@@ -83,4 +89,29 @@ test('handleYooKassaWebhook — does not call the API for a payment that is alre
   await new PaymentService().handleYooKassaWebhook('ext-4');
 
   assert.deepStrictEqual(updates, []);
+});
+
+test('handleYooKassaWebhook — a repeated "succeeded" notification does not start a second delivery', async (t) => {
+  const updates = stubDb(t, 'pending');
+  const delivery = t.mock.method(DeliveryService.prototype, 'attemptDelivery', async () => {});
+  t.mock.method(EmailService.prototype, 'sendPurchaseConfirmation', async () => ({ sent: false }));
+  const succeeded = {
+    id: 'ext-5',
+    status: 'succeeded',
+    amount: { value: '100.00', currency: 'RUB' },
+    paid: true,
+    refundable: true,
+    created_at: 'now',
+  };
+  nock(BASE).get('/v3/payments/ext-5').twice().reply(200, succeeded);
+
+  const service = new PaymentService();
+  await Promise.all([
+    service.handleYooKassaWebhook('ext-5'),
+    service.handleYooKassaWebhook('ext-5'),
+  ]);
+
+  assert.strictEqual(updates.length, 1);
+  assert.strictEqual(updates[0]!.status, 'paid');
+  assert.strictEqual(delivery.mock.callCount(), 1);
 });
