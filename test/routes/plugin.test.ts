@@ -34,3 +34,15 @@ test('POST /plugin/deliveries/:id/result — 401 without X-Api-Key', async (t) =
 
   assert.strictEqual(res.statusCode, 401);
 });
+
+test('POST /plugin/deliveries/pending — 401 without X-Api-Key header', async (t) => {
+  const app = await build(t);
+
+  const res = await app.inject({
+    method: 'POST',
+    url: '/plugin/deliveries/pending',
+    payload: { online: ['Steve'] },
+  });
+
+  assert.strictEqual(res.statusCode, 401);
+});

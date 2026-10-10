@@ -59,6 +59,24 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return deliveryService.pendingForPlugin(pluginServerId(request), null);
   });
 
+  fastify.post<{ Body: { online?: string[] } | undefined }>('/deliveries/pending', {
+    preHandler: authenticatePlugin,
+    schema: {
+      body: {
+        type: 'object' as const,
+        properties: {
+          online: {
+            type: 'array' as const,
+            maxItems: 10000,
+            items: { type: 'string' as const, maxLength: 64 },
+          },
+        },
+      },
+    },
+  }, async (request) => {
+    return deliveryService.pendingForPlugin(pluginServerId(request), request.body?.online ?? []);
+  });
+
   fastify.post<{
     Params: { paymentId: string };
     Body: {
