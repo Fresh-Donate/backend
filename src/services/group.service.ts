@@ -4,6 +4,15 @@ import { Product } from '@/models/product.model';
 import { NotFoundError, ValidationError } from '@/core';
 import type { GroupDto, CreateGroupDto, UpdateGroupDto } from '@/types';
 
+export async function assertGroupsExist(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const unique = Array.from(new Set(ids));
+  const found = await Group.count({ where: { id: unique } });
+  if (found !== unique.length) {
+    throw new ValidationError('One or more groupIds do not exist');
+  }
+}
+
 function toDto(g: Group): GroupDto {
   return {
     id: g.id,

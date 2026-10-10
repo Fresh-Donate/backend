@@ -46,6 +46,7 @@ export interface CreateProductDto {
   allowCustomCount: boolean;
   forceDelivery?: boolean;
   serverIds?: string[];
+  groupIds?: string[];
 }
 
 export interface UpdateProductDto {
@@ -60,4 +61,5 @@ export interface UpdateProductDto {
   allowCustomCount?: boolean;
   forceDelivery?: boolean;
   serverIds?: string[];
+  groupIds?: string[];
 }

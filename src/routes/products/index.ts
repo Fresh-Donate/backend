@@ -16,6 +16,7 @@ const productBodySchema = {
     allowCustomCount: { type: 'boolean' as const },
     forceDelivery: { type: 'boolean' as const },
     serverIds: { type: 'array' as const, items: { type: 'string' as const, maxLength: 64 } },
+    groupIds: { type: 'array' as const, items: { type: 'string' as const, format: 'uuid' } },
   },
 };
 
