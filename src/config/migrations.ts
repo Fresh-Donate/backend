@@ -170,10 +170,34 @@ async function cartTables(db: Sequelize): Promise<void> {
   `);
 }
 
+async function paymentIndexes(db: Sequelize): Promise<void> {
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS payments_status_created_at_idx
+      ON payments (status, created_at);
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS payments_external_payment_id_idx
+      ON payments (external_payment_id);
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS payments_customer_nickname_idx
+      ON payments (customer_nickname);
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS payments_paid_at_idx
+      ON payments (paid_at);
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS payment_items_product_id_idx
+      ON payment_items (product_id);
+  `);
+}
+
 const migrations: Migration[] = [
   { name: '001-customers-snapshot', up: snapshotCustomers },
   { name: '002-multi-server', up: multiServerTables },
   { name: '003-cart', up: cartTables },
+  { name: '004-payment-indexes', up: paymentIndexes },
 ];
 
 export async function runMigrations(db: Sequelize): Promise<void> {
