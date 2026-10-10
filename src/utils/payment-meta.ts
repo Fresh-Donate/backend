@@ -1,12 +1,10 @@
 import { literal } from 'sequelize';
+import { sequelize } from '@/config/database';
 import { Payment } from '@/models/payment.model';
 
 function jsonb(value: unknown): string {
-  return `'${JSON.stringify(value).replace(/'/g, "''")}'::jsonb`;
-}
-
-function text(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+  const json = JSON.stringify(value, (_key, v) => (typeof v === 'string' ? v.replaceAll('\u0000', '') : v));
+  return `${sequelize.escape(json)}::jsonb`;
 }
 
 export function mergedMeta(patch: Record<string, unknown>) {
@@ -19,7 +17,7 @@ export async function patchPaymentMeta(paymentId: string, patch: Record<string, 
 
 export async function removePaymentMetaKey(paymentId: string, key: string): Promise<void> {
   await Payment.update(
-    { meta: literal(`COALESCE("meta", '{}'::jsonb) - ${text(key)}`) },
+    { meta: literal(`COALESCE("meta", '{}'::jsonb) - ${sequelize.escape(key)}`) },
     { where: { id: paymentId } },
   );
 }
