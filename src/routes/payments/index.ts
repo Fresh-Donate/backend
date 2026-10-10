@@ -209,14 +209,12 @@ const paymentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     return service.confirmPayment(request.params.id);
   });
 
-  fastify.post<{ Params: { id: string } }>('/:id/retry-delivery', {
+  fastify.post<{ Params: { id: string } }>('/:id/force-delivery', {
     onRequest: [fastify.authenticate],
   }, async (request, reply) => {
     const existing = await service.findById(request.params.id);
     if (!existing) return reply.code(404).send({ error: 'Payment not found' });
-    if (existing.status === 'paid' || existing.status === 'failed') {
-      await deliveryService.force(existing.id);
-    }
+    await deliveryService.force(existing.id);
     return service.findById(existing.id);
   });
 
