@@ -15,7 +15,7 @@ import {
   type CurrencyRates,
   type SupportedCurrency,
 } from '@/utils/currency';
-import type { SettingsDto, SmtpConfig, ReceiptTemplate } from '@/types';
+import type { SettingsDto, SettingsResponseDto, SmtpConfig, ReceiptTemplate } from '@/types';
 import { MIN_AMOUNT_LOWER, MIN_AMOUNT_UPPER } from '@/types/payment-provider';
 
 function generateToken(): string {
@@ -81,13 +81,15 @@ function normalizeSmtpPatch(patch: Partial<SmtpConfig> | undefined, current: Smt
   if (patch === undefined) return undefined;
   const port = patch.port !== undefined ? Number(patch.port) : current.port;
   const safePort = Number.isFinite(port) && port > 0 && port < 65536 ? Math.floor(port) : current.port;
+  const user = typeof patch.user === 'string' ? patch.user.slice(0, 256) : current.user;
+  const password = typeof patch.password === 'string' && patch.password.trim() ? patch.password.slice(0, 512) : current.password;
   return {
     enabled: typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled,
     host: typeof patch.host === 'string' ? patch.host.trim().slice(0, 256) : current.host,
     port: safePort,
     secure: typeof patch.secure === 'boolean' ? patch.secure : current.secure,
-    user: typeof patch.user === 'string' ? patch.user.slice(0, 256) : current.user,
-    password: typeof patch.password === 'string' ? patch.password.slice(0, 512) : current.password,
+    user,
+    password: !user ? '' : password,
     fromEmail: typeof patch.fromEmail === 'string' ? patch.fromEmail.trim().slice(0, 256) : current.fromEmail,
     fromName: typeof patch.fromName === 'string' ? patch.fromName.trim().slice(0, 128) : current.fromName,
   };
@@ -117,6 +119,13 @@ function toDto(s: Settings): SettingsDto {
     installation_id: s.installation_id,
     smtp_config: fillSmtpConfig(s.smtp_config),
     receipt_template: fillReceiptTemplate(s.receipt_template),
+  };
+}
+
+export function hideSecrets(dto: SettingsDto): SettingsResponseDto {
+  return {
+    ...dto,
+    smtp_config: { ...dto.smtp_config, password: '', passwordSet: Boolean(dto.smtp_config.password) },
   };
 }
 

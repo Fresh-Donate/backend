@@ -1,5 +1,5 @@
 import { type FastifyPluginAsync } from 'fastify';
-import { SettingsService } from '@/services/settings.service';
+import { SettingsService, hideSecrets } from '@/services/settings.service';
 import { EmailService, RECEIPT_PLACEHOLDERS } from '@/services/email.service';
 import { ValidationError } from '@/core';
 import type { SettingsDto, ReceiptTemplate } from '@/types';
@@ -13,7 +13,7 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
   const emailService = new EmailService();
 
   fastify.get('/', { onRequest: [fastify.authenticate] }, async () => {
-    return service.get();
+    return hideSecrets(await service.get());
   });
 
   fastify.put<{
@@ -99,7 +99,7 @@ const settingsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         await fastify.telemetry?.onToggle(after.telemetry_enabled);
       }
 
-      return after;
+      return hideSecrets(after);
     } catch (err) {
       if (isValidationError(err)) {
         return reply.code(400).send({ error: err.message });

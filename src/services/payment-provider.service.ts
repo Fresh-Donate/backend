@@ -85,7 +85,24 @@ const DEFAULT_PROVIDERS: ProviderDefinition[] = [
   },
 ];
 
+const PUBLIC_CREDENTIALS = new Set(['shopId', 'merchantId', 'merchantLogin']);
+
+function isSecretCredential(key: string): boolean {
+  return !PUBLIC_CREDENTIALS.has(key);
+}
+
 function toDto(p: PaymentProvider): PaymentProviderDto {
+  const credentials: Record<string, string> = {};
+  const secretCredentials: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(p.credentials || {})) {
+    if (isSecretCredential(key)) {
+      credentials[key] = '';
+      secretCredentials[key] = Boolean(value);
+    } else {
+      credentials[key] = value;
+    }
+  }
+
   return {
     id: p.id,
     providerId: p.providerId,
@@ -94,7 +111,8 @@ function toDto(p: PaymentProvider): PaymentProviderDto {
     icon: p.icon,
     enabled: p.enabled,
     testMode: p.testMode,
-    credentials: p.credentials,
+    credentials,
+    secretCredentials,
     providerConfig: p.providerConfig || {},
     commissionPercent: Number(p.commissionPercent),
     commissionRule: p.commissionRule,
@@ -162,9 +180,26 @@ export class PaymentProviderService {
       throw new NotFoundError(`Payment provider "${providerId}" not found`);
     }
 
-    await provider.update(data);
+    const { credentials, ...rest } = data;
+    await provider.update({
+      ...rest,
+      ...(credentials && { credentials: mergeCredentials(provider.credentials || {}, credentials) }),
+    });
     return toDto(provider);
   }
+}
+
+function mergeCredentials(
+  current: Record<string, string>,
+  incoming: Record<string, string>,
+): Record<string, string> {
+  const result = { ...current };
+  for (const [key, value] of Object.entries(incoming)) {
+    if (!(key in current)) continue;
+    if (isSecretCredential(key) && !value.trim()) continue;
+    result[key] = value;
+  }
+  return result;
 }
 
 function mergeProviderConfig(

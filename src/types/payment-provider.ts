@@ -9,6 +9,7 @@ export interface PaymentProviderDto {
   enabled: boolean;
   testMode: boolean;
   credentials: Record<string, string>;
+  secretCredentials: Record<string, boolean>;
   providerConfig: Record<string, any>;
   commissionPercent: number;
   commissionRule: CommissionRuleData;
