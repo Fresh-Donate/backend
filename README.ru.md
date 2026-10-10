@@ -34,7 +34,6 @@ FreshDonate - самохостимая система приёма донато�
 
 - **Fastify 5** (TypeScript) + autoload плагинов/роутов
 - **PostgreSQL 17** через **Sequelize 6** (sequelize‑typescript)
-- **Redis 7** для rate‑limit и коротких кэшей
 - **JWT** для авторизации, **bcrypt** для хеширования пароля админа
 - **axios** для запросов во внешние шлюзы
 - **node:test** + **c8** для тестов и покрытия
@@ -43,7 +42,6 @@ FreshDonate - самохостимая система приёма донато�
 
 - Node.js 20+
 - PostgreSQL 14+ (рекомендуется 17)
-- Redis 6+ (в dev‑режиме можно отключить: `SKIP_REDIS=true`)
 - Для доставки: запущенный [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) **или** RCON‑доступ к серверу
 
 ## Быстрый старт (dev)
@@ -65,11 +63,13 @@ npm start               # запуск fastify-cli на dist/app.js
 
 ## Docker
 
-В репозитории есть `Dockerfile` и `docker-compose.yml`, которые поднимут Postgres + Redis + бекенд одной командой:
+В репозитории есть `Dockerfile` и `docker-compose.yml`, которые поднимут Postgres + бекенд одной командой:
 
 ```bash
 docker compose up -d --build
 ```
+
+Redis больше не используется. На уже установленном сервере контейнер `redis` и переменные `REDIS_*` можно оставить, они просто игнорируются; удалить контейнер можно командой `docker compose up -d --remove-orphans`.
 
 ## Конфигурация
 
@@ -79,7 +79,6 @@ docker compose up -d --build
 |---------------------------------------------------------------|-----------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `HOST` / `PORT`                                               | `0.0.0.0` / `3001`                                              | Адрес HTTP‑сервера                                                                                                                                       |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `fresh_donate` / `postgres` / `postgres` | Подключение к PostgreSQL                                                                                                                                 |
-| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD`                | `localhost` / `6379` / *(пусто)*                                | Подключение к Redis                                                                                                                                      |
 | `ADMIN_LOGIN` / `ADMIN_PASSWORD`                              | `admin` / `admin`                                               | Стартовые учётные данные админа (смени на проде!)                                                                                                        |
 | `JWT_SECRET` / `JWT_EXPIRES_IN`                               | *(генерируется, хранится в БД)* / `24h`                         | Параметры JWT. Если пусто или стоит значение из `.env.example`, секрет создаётся при первом запуске и хранится в таблице `settings`. Смена `ADMIN_LOGIN` или `ADMIN_PASSWORD` завершает все сессии |
 | `CORS_ORIGIN`                                                 | `http://localhost:3000,http://localhost:3002`                   | Список разрешённых origin через запятую                                                                                                                  |
@@ -88,7 +87,7 @@ docker compose up -d --build
 | `<PROVIDER>_SKIP_SIGNATURE_CHECK`                             | `false`                                                         | `WATA`, `TEBEX`, `CRYPTOBOT`, `ROBOKASSA`: принимать вебхуки без валидной подписи. Только для локальной отладки, `NODE_ENV` больше не отключает проверки |
 | `PAYMENT_RETURN_URL`                                          | `http://localhost:3002/payment/success`                         | Куда редиректит шлюз игрока после оплаты                                                                                                                 |
 | `WEBHOOK_BASE_URL`                                            | `http://localhost:3001`                                         | Публичный URL бекенда для вебхуков шлюзов                                                                                                                |
-| `SKIP_DB` / `SKIP_REDIS`                                      | `false`                                                         | Отключить внешние зависимости (используется тестами)                                                                                                     |
+| `SKIP_DB`                                                     | `false`                                                         | Отключить внешние зависимости (используется тестами)                                                                                                     |
 
 ## Структура проекта
 
@@ -98,7 +97,7 @@ src/
   core/        базовые repository/service/controller, общие ошибки
   gateways/    HTTP‑клиенты для YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot
   models/      модели Sequelize
-  plugins/     плагины Fastify (jwt, cors, redis, rate-limit, error-handler)
+  plugins/     плагины Fastify (jwt, cors, rate-limit, error-handler)
   routes/      auth, products, payments, customers, stats, webhooks, plugin
   services/    бизнес‑логика (платежи, доставка, rcon, настройки, ...)
 test/          тесты на node:test (unit + route‑level)

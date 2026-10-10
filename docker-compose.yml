@@ -11,8 +11,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     networks:
       - fresh-network
 
@@ -33,23 +31,8 @@ services:
     networks:
       - fresh-network
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD:-redis}
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis}", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - fresh-network
-
 volumes:
   postgres_data:
-  redis_data:
   uploads_data:
 
 networks:

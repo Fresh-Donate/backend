@@ -34,7 +34,6 @@ The backend is the single source of truth for products, payments and customers. 
 
 - **Fastify 5** (TypeScript) + autoload plugins/routes
 - **PostgreSQL 17** via **Sequelize 6** (sequelize‑typescript)
-- **Redis 7** for rate‑limiting and short‑lived caches
 - **JWT** authentication, **bcrypt** for admin password hashing
 - **axios** for outbound gateway calls
 - **node:test** + **c8** for tests and coverage
@@ -43,7 +42,6 @@ The backend is the single source of truth for products, payments and customers. 
 
 - Node.js 20+
 - PostgreSQL 14+ (17 recommended)
-- Redis 6+ (optional in dev - set `SKIP_REDIS=true`)
 - For delivery: a running [fresh-donate-plugin](https://github.com/Fresh-Donate/fresh-donate-plugin) **or** RCON access to the server
 
 ## Quick start (dev)
@@ -65,11 +63,13 @@ npm start               # runs fastify-cli against dist/app.js
 
 ## Docker
 
-A `Dockerfile` and `docker-compose.yml` are provided and bring up Postgres + Redis + backend together:
+A `Dockerfile` and `docker-compose.yml` are provided and bring up Postgres + backend together:
 
 ```bash
 docker compose up -d --build
 ```
+
+Redis is no longer used. On an existing install the `redis` container and `REDIS_*` variables can stay, they are ignored; to remove the container run `docker compose up -d --remove-orphans`.
 
 ## Configuration
 
@@ -79,7 +79,6 @@ All configuration is read from environment variables (see `src/config/index.ts`)
 |---------------------------------------------------------------|-----------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `HOST` / `PORT`                                               | `0.0.0.0` / `3001`                                              | HTTP bind address                                                                                                                                 |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `fresh_donate` / `postgres` / `postgres` | PostgreSQL connection                                                                                                                             |
-| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD`                | `localhost` / `6379` / *(empty)*                                | Redis connection                                                                                                                                  |
 | `ADMIN_LOGIN` / `ADMIN_PASSWORD`                              | `admin` / `admin`                                               | Initial admin credentials (change in prod)                                                                                                        |
 | `JWT_SECRET` / `JWT_EXPIRES_IN`                               | *(generated, stored in DB)* / `24h`                             | JWT signing. Empty or the `.env.example` value means a random secret is generated on first start and kept in the `settings` table. Changing `ADMIN_LOGIN` or `ADMIN_PASSWORD` signs out every session |
 | `CORS_ORIGIN`                                                 | `http://localhost:3000,http://localhost:3002`                   | Comma‑separated allowed origins                                                                                                                   |
@@ -88,7 +87,7 @@ All configuration is read from environment variables (see `src/config/index.ts`)
 | `<PROVIDER>_SKIP_SIGNATURE_CHECK`                             | `false`                                                         | `WATA`, `TEBEX`, `CRYPTOBOT`, `ROBOKASSA`: accept webhooks without a valid signature. Local debugging only, `NODE_ENV` no longer turns checks off |
 | `PAYMENT_RETURN_URL`                                          | `http://localhost:3002/payment/success`                         | Where gateways redirect the player                                                                                                                |
 | `WEBHOOK_BASE_URL`                                            | `http://localhost:3001`                                         | Public backend URL used in gateway webhooks                                                                                                       |
-| `SKIP_DB` / `SKIP_REDIS`                                      | `false`                                                         | Skip external deps (used by tests)                                                                                                                |
+| `SKIP_DB`                                                     | `false`                                                         | Skip external deps (used by tests)                                                                                                                |
 
 ## Project structure
 
@@ -98,7 +97,7 @@ src/
   core/        base repository / service / controller, shared errors
   gateways/    YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot HTTP clients
   models/      Sequelize models
-  plugins/     Fastify plugins (jwt, cors, redis, rate-limit, error-handler)
+  plugins/     Fastify plugins (jwt, cors, rate-limit, error-handler)
   routes/      auth, products, payments, customers, stats, webhooks, plugin
   services/    business logic (payments, delivery, rcon, settings, ...)
 test/          node:test suites (unit + route‑level)
