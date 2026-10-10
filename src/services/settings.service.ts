@@ -144,9 +144,19 @@ async function findOrCreateSettings(): Promise<Settings> {
   return settings;
 }
 
+const CACHE_TTL_MS = 5000;
+let cached: { dto: SettingsDto; expiresAt: number } | null = null;
+let cacheVersion = 0;
+
 export class SettingsService {
   async get(): Promise<SettingsDto> {
-    return toDto(await findOrCreateSettings());
+    if (cached && cached.expiresAt > Date.now()) return cached.dto;
+    const version = cacheVersion;
+    const dto = toDto(await findOrCreateSettings());
+    if (version === cacheVersion) {
+      cached = { dto, expiresAt: Date.now() + CACHE_TTL_MS };
+    }
+    return dto;
   }
 
   async getJwtSecret(): Promise<string> {
@@ -211,6 +221,8 @@ export class SettingsService {
     delete (patch as Record<string, unknown>).jwt_secret;
 
     await settings.update(patch);
+    cacheVersion++;
+    cached = null;
 
     if (baseChanged) {
       await rebaseProviderMinAmounts(currentBase, nextBase, ratesBeforeUpdate);
