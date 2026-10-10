@@ -2,7 +2,6 @@ import { type FastifyPluginAsync, type FastifyRequest, type FastifyReply } from 
 import { SettingsService } from '@/services/settings.service';
 import { ServerService } from '@/services/server.service';
 import { DeliveryService } from '@/services/delivery.service';
-import { isUuid } from '@/utils/uuid';
 
 const settingsService = new SettingsService();
 const serverService = new ServerService();
@@ -48,19 +47,22 @@ function pluginServerId(request: FastifyRequest): string | null {
 const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
 
   fastify.get('/ping', {
-    preHandler: authenticatePlugin,
+    config: { rateLimit: false },
+    onRequest: authenticatePlugin,
   }, async (request) => {
     return { status: 'ok', serverId: pluginServerId(request) };
   });
 
   fastify.get('/deliveries/pending', {
-    preHandler: authenticatePlugin,
+    config: { rateLimit: false },
+    onRequest: authenticatePlugin,
   }, async (request) => {
     return deliveryService.pendingForPlugin(pluginServerId(request), null);
   });
 
   fastify.post<{ Body: { online?: string[] } | undefined }>('/deliveries/pending', {
-    preHandler: authenticatePlugin,
+    config: { rateLimit: false },
+    onRequest: authenticatePlugin,
     schema: {
       body: {
         type: 'object' as const,
@@ -84,8 +86,15 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       logs: Array<{ command: string; success: boolean; response: string }>;
     };
   }>('/deliveries/:paymentId/result', {
-    preHandler: authenticatePlugin,
+    config: { rateLimit: false },
+    onRequest: authenticatePlugin,
     schema: {
+      params: {
+        type: 'object' as const,
+        properties: {
+          paymentId: { type: 'string' as const, format: 'uuid' },
+        },
+      },
       body: {
         type: 'object' as const,
         required: ['success', 'logs'],
@@ -106,21 +115,21 @@ const pluginRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       },
     },
   }, async (request, reply) => {
-    const { paymentId } = request.params;
-    if (!isUuid(paymentId)) {
-      return reply.code(404).send({ error: 'Payment not found' });
-    }
-
     const logs = request.body.logs.map((l) => ({
       command: String(l.command ?? ''),
       success: l.success === true,
       response: String(l.response ?? ''),
     }));
-    const result = await deliveryService.reportFromPlugin(paymentId, pluginServerId(request), request.body.success, logs);
-    if (!result) {
+    const deliveryStatus = await deliveryService.reportFromPlugin(
+      request.params.paymentId,
+      pluginServerId(request),
+      request.body.success,
+      logs,
+    );
+    if (!deliveryStatus) {
       return reply.code(404).send({ error: 'No pending delivery for this payment' });
     }
-    return { status: 'ok', ...result };
+    return { status: 'ok', deliveryStatus };
   });
 };
 

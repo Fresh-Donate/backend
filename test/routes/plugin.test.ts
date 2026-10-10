@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert';
 import { build } from '../helper';
+import { SettingsService } from '../../src/services/settings.service';
 
 // These tests exercise the X-Api-Key auth gate. Paths that hit the DB
 // are not tested here because we run with SKIP_DB=true.
@@ -45,4 +46,21 @@ test('POST /plugin/deliveries/pending — 401 without X-Api-Key header', async (
   });
 
   assert.strictEqual(res.statusCode, 401);
+});
+
+test('POST /plugin/deliveries/:id/result — 400 for an id that is not a uuid', async (t) => {
+  t.mock.method(SettingsService.prototype, 'get', async () => ({
+    plugin_config: { token: 'plugin-token' },
+    multi_server_enabled: false,
+  }));
+  const app = await build(t);
+
+  const res = await app.inject({
+    method: 'POST',
+    url: '/plugin/deliveries/not-a-uuid/result',
+    headers: { 'x-api-key': 'plugin-token' },
+    payload: { success: true, logs: [] },
+  });
+
+  assert.strictEqual(res.statusCode, 400);
 });
