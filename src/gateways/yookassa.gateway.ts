@@ -1,6 +1,9 @@
 import axios, { type AxiosInstance } from 'axios';
 import { randomUUID } from 'node:crypto';
 import { PaymentError } from '@/core/errors';
+import { describeHttpError } from '@/utils/http-error';
+
+const yookassaError = (body: any) => [body?.description];
 import type {
   YooKassaPayment,
   YooKassaRefund,
@@ -54,8 +57,7 @@ export class YooKassaGateway {
       });
       return data;
     } catch (error: any) {
-      const msg = error.response?.data?.description || error.message;
-      throw new PaymentError(`YooKassa createPayment failed: ${msg}`, 'YOOKASSA_CREATE_ERROR');
+      throw new PaymentError(`YooKassa createPayment failed: ${describeHttpError(error, yookassaError)}`, 'YOOKASSA_CREATE_ERROR');
     }
   }
 
@@ -64,8 +66,7 @@ export class YooKassaGateway {
       const { data } = await this.client.get<YooKassaPayment>(`/payments/${paymentId}`);
       return data;
     } catch (error: any) {
-      const msg = error.response?.data?.description || error.message;
-      throw new PaymentError(`YooKassa getPayment failed: ${msg}`, 'YOOKASSA_GET_ERROR');
+      throw new PaymentError(`YooKassa getPayment failed: ${describeHttpError(error, yookassaError)}`, 'YOOKASSA_GET_ERROR');
     }
   }
 
@@ -80,8 +81,7 @@ export class YooKassaGateway {
       );
       return data;
     } catch (error: any) {
-      const msg = error.response?.data?.description || error.message;
-      throw new PaymentError(`YooKassa capturePayment failed: ${msg}`, 'YOOKASSA_CAPTURE_ERROR');
+      throw new PaymentError(`YooKassa capturePayment failed: ${describeHttpError(error, yookassaError)}`, 'YOOKASSA_CAPTURE_ERROR');
     }
   }
 
@@ -99,8 +99,7 @@ export class YooKassaGateway {
       );
       return data;
     } catch (error: any) {
-      const msg = error.response?.data?.description || error.message;
-      throw new PaymentError(`YooKassa createRefund failed: ${msg}`, 'YOOKASSA_REFUND_ERROR');
+      throw new PaymentError(`YooKassa createRefund failed: ${describeHttpError(error, yookassaError)}`, 'YOOKASSA_REFUND_ERROR');
     }
   }
 }

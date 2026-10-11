@@ -1,6 +1,9 @@
 import axios, { type AxiosInstance } from 'axios';
 import { createHash } from 'node:crypto';
 import { PaymentError } from '@/core/errors';
+import { describeHttpError } from '@/utils/http-error';
+
+const heleketError = (body: any) => [body?.message, ...Object.values(body?.errors ?? {}).flat()];
 import type { HeleketPayment, CreateHeleketPaymentParams } from '@/types';
 
 const HELEKET_API_URL = 'https://api.heleket.com/v1';
@@ -41,7 +44,7 @@ export class HeleketGateway {
     if (params.lifetime) body.lifetime = params.lifetime;
 
     try {
-      const { data } = await this.client.post<{ state: number; result: HeleketPayment }>('/payment', body, {
+      const { data } = await this.client.post<{ state: number; result: HeleketPayment; message?: string }>('/payment', body, {
         headers: {
           merchant: this.merchantId,
           sign: this.sign(body),
@@ -49,14 +52,13 @@ export class HeleketGateway {
       });
 
       if (data.state !== 0) {
-        throw new PaymentError(`Heleket returned state ${data.state}`, 'HELEKET_CREATE_ERROR');
+        throw new PaymentError(`Heleket returned state ${data.state}${data.message ? `: ${data.message}` : ''}`, 'HELEKET_CREATE_ERROR');
       }
 
       return data.result;
     } catch (error: any) {
       if (error instanceof PaymentError) throw error;
-      const msg = error.response?.data?.message || error.message;
-      throw new PaymentError(`Heleket createPayment failed: ${msg}`, 'HELEKET_CREATE_ERROR');
+      throw new PaymentError(`Heleket createPayment failed: ${describeHttpError(error, heleketError)}`, 'HELEKET_CREATE_ERROR');
     }
   }
 
@@ -73,8 +75,7 @@ export class HeleketGateway {
 
       return data.result;
     } catch (error: any) {
-      const msg = error.response?.data?.message || error.message;
-      throw new PaymentError(`Heleket getPayment failed: ${msg}`, 'HELEKET_GET_ERROR');
+      throw new PaymentError(`Heleket getPayment failed: ${describeHttpError(error, heleketError)}`, 'HELEKET_GET_ERROR');
     }
   }
 

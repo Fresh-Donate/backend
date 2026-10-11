@@ -98,6 +98,19 @@ test('createPayment — omits optional urls when not provided', async () => {
   assert.strictEqual(body.lifetime, undefined);
 });
 
+test('createPayment — reports field validation errors', async () => {
+  const gateway = new HeleketGateway(MERCHANT, API_KEY);
+
+  nock(BASE)
+    .post('/v1/payment')
+    .reply(422, { state: 1, errors: { amount: ['The amount must be at least 1.'] } });
+
+  await assert.rejects(
+    gateway.createPayment({ amount: 0.1, currency: 'USDT', orderId: 'x', urlCallback: 'https://cb' }),
+    /Heleket createPayment failed: 422 The amount must be at least 1\./,
+  );
+});
+
 test('createPayment — throws PaymentError when state != 0', async () => {
   const gateway = new HeleketGateway(MERCHANT, API_KEY);
 

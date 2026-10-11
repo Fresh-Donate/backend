@@ -751,8 +751,14 @@ export class PaymentService {
       try {
         await this.createExternalPayment(payment, provider, orderLabel, buyer.customerIp);
       } catch (err) {
-        await this.transition(payment.id, { status: 'pending' }, { status: 'failed' }, { cancelReason: 'provider_error' })
-          .catch(() => undefined);
+        const providerError = err instanceof Error ? err.message : String(err);
+        console.warn(`Checkout: ${provider.providerId} could not create payment ${payment.id}: ${providerError}`);
+        await this.transition(
+          payment.id,
+          { status: 'pending' },
+          { status: 'failed', providerId: provider.providerId },
+          { cancelReason: 'provider_error', providerError },
+        ).catch(() => undefined);
         throw err;
       }
     }

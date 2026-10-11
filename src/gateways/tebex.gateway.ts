@@ -1,6 +1,7 @@
 import axios, { type AxiosInstance } from 'axios';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { PaymentError } from '@/core/errors';
+import { describeHttpError } from '@/utils/http-error';
 import {
   decomposeAmount,
   missingCoinDenominations,
@@ -18,6 +19,15 @@ const TEBEX_HEADLESS_API_URL = 'https://headless.tebex.io/api';
 // `links.checkout` (happens on freshly-created empty baskets for some store
 // types - the link only materialises once items are added).
 const TEBEX_CHECKOUT_URL = (ident: string) => `https://checkout.tebex.io/checkout/${ident}`;
+
+const tebexError = (body: any) => [
+  body?.detail,
+  body?.title,
+  body?.message,
+  body?.error,
+  body?.errors?.[0]?.detail,
+  body?.errors?.[0]?.message,
+];
 
 // Tebex Headless for Minecraft validates `username` against Mojang. Offline-
 // mode servers and players whose nick isn't a premium account get rejected
@@ -133,7 +143,7 @@ export class TebexGateway {
         );
       }
 
-      const detail = this.extractErrorMessage(error);
+      const detail = describeHttpError(error, tebexError);
       throw new PaymentError(`Tebex createBasket failed: ${detail}`, 'TEBEX_CREATE_BASKET_ERROR');
     }
   }
@@ -154,7 +164,7 @@ export class TebexGateway {
       console.error(
         `[tebex] addPackage failed basket=${basketIdent} pkg=${packageId} qty=${quantity} status=${error.response?.status} body=${JSON.stringify(error.response?.data).slice(0, 500)}`,
       );
-      const detail = this.extractErrorMessage(error);
+      const detail = describeHttpError(error, tebexError);
       throw new PaymentError(
         `Tebex addPackage failed (basket=${basketIdent} pkg=${packageId} qty=${quantity}): ${detail}`,
         'TEBEX_ADD_PACKAGE_ERROR',
@@ -275,17 +285,6 @@ export class TebexGateway {
     } catch {
       return false;
     }
-  }
-
-  private extractErrorMessage(error: any): string {
-    return (
-      error.response?.data?.detail
-      || error.response?.data?.message
-      || error.response?.data?.error
-      || error.response?.data?.errors?.[0]?.detail
-      || error.response?.data?.errors?.[0]?.message
-      || error.message
-    );
   }
 }
 

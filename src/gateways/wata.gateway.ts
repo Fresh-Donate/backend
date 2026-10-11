@@ -1,6 +1,7 @@
 import axios, { type AxiosInstance } from 'axios';
 import { createPublicKey, createVerify } from 'node:crypto';
 import { PaymentError } from '@/core/errors';
+import { describeHttpError } from '@/utils/http-error';
 import type {
   WataPaymentLink,
   WataTransaction,
@@ -11,6 +12,14 @@ const WATA_PROD_URL = 'https://api.wata.pro/api/h2h';
 const WATA_SANDBOX_URL = 'https://api-sandbox.wata.pro/api/h2h';
 
 const publicKeyCache = new Map<string, string>();
+
+const wataError = (body: any) => [
+  body?.error,
+  body?.error?.details,
+  body?.error?.validationErrors?.[0]?.message,
+  body?.error?.message,
+  body?.message,
+];
 
 // Wata: RUB/EUR/USD payment links. Auth = Bearer JWT issued in dashboard.
 // Webhook signatures are RSA-SHA512 over the raw body, base64 in `X-Signature`.
@@ -51,12 +60,7 @@ export class WataGateway {
       const { data } = await this.client.post<WataPaymentLink>('/links', body);
       return data;
     } catch (error: any) {
-      const msg =
-        error.response?.data?.error
-        || error.response?.data?.message
-        || error.response?.data?.validationErrors?.[0]?.message
-        || error.message;
-      throw new PaymentError(`Wata createPaymentLink failed: ${msg}`, 'WATA_CREATE_ERROR');
+      throw new PaymentError(`Wata createPaymentLink failed: ${describeHttpError(error, wataError)}`, 'WATA_CREATE_ERROR');
     }
   }
 
@@ -65,8 +69,7 @@ export class WataGateway {
       const { data } = await this.client.get<WataPaymentLink>(`/links/${id}`);
       return data;
     } catch (error: any) {
-      const msg = error.response?.data?.error || error.response?.data?.message || error.message;
-      throw new PaymentError(`Wata getPaymentLink failed: ${msg}`, 'WATA_GET_ERROR');
+      throw new PaymentError(`Wata getPaymentLink failed: ${describeHttpError(error, wataError)}`, 'WATA_GET_ERROR');
     }
   }
 
@@ -75,8 +78,7 @@ export class WataGateway {
       const { data } = await this.client.get<WataTransaction>(`/transactions/${transactionId}`);
       return data;
     } catch (error: any) {
-      const msg = error.response?.data?.error || error.response?.data?.message || error.message;
-      throw new PaymentError(`Wata getTransaction failed: ${msg}`, 'WATA_GET_ERROR');
+      throw new PaymentError(`Wata getTransaction failed: ${describeHttpError(error, wataError)}`, 'WATA_GET_ERROR');
     }
   }
 
@@ -118,8 +120,7 @@ export class WataGateway {
       return pem;
     } catch (error: any) {
       if (error instanceof PaymentError) throw error;
-      const msg = error.response?.data?.error || error.response?.data?.message || error.message;
-      throw new PaymentError(`Wata fetchPublicKey failed: ${msg}`, 'WATA_PUBKEY_ERROR');
+      throw new PaymentError(`Wata fetchPublicKey failed: ${describeHttpError(error, wataError)}`, 'WATA_PUBKEY_ERROR');
     }
   }
 
