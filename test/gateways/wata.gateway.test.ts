@@ -116,16 +116,35 @@ test('createPaymentLink — throws PaymentError on validation failure', async ()
 
   nock(PROD)
     .post(`${PROD_PATH}/links`)
-    .reply(400, { validationErrors: [{ message: 'Amount out of range' }] });
+    .reply(400, {
+      error: {
+        code: null,
+        message: 'Ваш запрос недействителен!',
+        details: 'При проверке были обнаружены следующие ошибки - Amount out of range',
+        validationErrors: [{ message: 'Amount out of range', members: ['amount'] }],
+      },
+    });
 
   await assert.rejects(
     gateway.createPaymentLink({ amount: 1, currency: 'RUB', orderId: 'o' }),
     (err: any) => {
       assert.ok(err instanceof PaymentError);
       assert.strictEqual(err.code, 'WATA_CREATE_ERROR');
-      assert.match(err.message, /Amount out of range/);
+      assert.match(err.message, /400 .*Amount out of range/);
+      assert.doesNotMatch(err.message, /object Object/);
       return true;
     },
+  );
+});
+
+test('createPaymentLink — keeps the status when the error body is empty', async () => {
+  const gateway = new WataGateway(API_KEY);
+
+  nock(PROD).post(`${PROD_PATH}/links`).reply(503, '');
+
+  await assert.rejects(
+    gateway.createPaymentLink({ amount: 100, currency: 'RUB', orderId: 'o' }),
+    /Wata createPaymentLink failed: 503 /,
   );
 });
 

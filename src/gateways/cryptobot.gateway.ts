@@ -1,6 +1,9 @@
 import axios, { type AxiosInstance } from 'axios';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { PaymentError } from '@/core/errors';
+import { describeHttpError } from '@/utils/http-error';
+
+const cryptobotError = (body: any) => [body?.error?.name, body?.error];
 import type {
   CryptoBotInvoice,
   CryptoBotApiResponse,
@@ -81,8 +84,7 @@ export class CryptoBotGateway {
       return data.result;
     } catch (error: any) {
       if (error instanceof PaymentError) throw error;
-      const msg = error.response?.data?.error?.name || error.response?.data?.error || error.message;
-      throw new PaymentError(`CryptoBot createInvoice failed: ${msg}`, 'CRYPTOBOT_CREATE_ERROR');
+      throw new PaymentError(`CryptoBot createInvoice failed: ${describeHttpError(error, cryptobotError)}`, 'CRYPTOBOT_CREATE_ERROR');
     }
   }
 
@@ -103,8 +105,7 @@ export class CryptoBotGateway {
       return data.result.items[0] || null;
     } catch (error: any) {
       if (error instanceof PaymentError) throw error;
-      const msg = error.response?.data?.error?.name || error.message;
-      throw new PaymentError(`CryptoBot getInvoice failed: ${msg}`, 'CRYPTOBOT_GET_ERROR');
+      throw new PaymentError(`CryptoBot getInvoice failed: ${describeHttpError(error, cryptobotError)}`, 'CRYPTOBOT_GET_ERROR');
     }
   }
 
