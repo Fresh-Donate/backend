@@ -16,5 +16,6 @@ export * from './cryptobot';
 export * from './wata';
 export * from './robokassa';
 export * from './tebex';
+export * from './rollypay';
 export * from './stats';
 export * from './server';

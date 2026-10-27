@@ -15,6 +15,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   robokassa: 'Robokassa',
   cryptobot: 'CryptoBot',
   tebex: 'Tebex',
+  rollypay: 'RollyPay',
 };
 
 export const RECEIPT_PLACEHOLDERS: { key: string; description: string }[] = [

@@ -25,7 +25,7 @@ The platform is split into four repositories:
 The backend is the single source of truth for products, payments and customers. It:
 
 - serves the REST API consumed by the shop and the admin panel;
-- creates payments in external gateways (YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot) and handles their webhooks;
+- creates payments in external gateways (YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot, RollyPay) and handles their webhooks;
 - stores pending deliveries and hands them to the in‑game plugin when a player logs in;
 - runs an RCON fallback for servers without the plugin installed;
 - issues JWT tokens for the admin panel and rate‑limits public endpoints.
@@ -84,7 +84,7 @@ All configuration is read from environment variables (see `src/config/index.ts`)
 | `CORS_ORIGIN`                                                 | `http://localhost:3000,http://localhost:3002`                   | Comma‑separated allowed origins                                                                                                                   |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_TIMEWINDOW`                    | `100` / `60000`                                                 | Global rate limit                                                                                                                                 |
 | `TRUSTED_PROXIES`                                             | private ranges                                                  | Proxies whose `X-Forwarded-For` is trusted when resolving the client IP. The default fits a reverse proxy on the Docker network (Coolify/Traefik, nginx in compose). `GET /health` returns the `ip` the backend sees: it must be your address, not the proxy's. Behind Cloudflare, add Cloudflare ranges here and to the proxy's trusted IPs |
-| `<PROVIDER>_SKIP_SIGNATURE_CHECK`                             | `false`                                                         | `WATA`, `TEBEX`, `CRYPTOBOT`, `ROBOKASSA`: accept webhooks without a valid signature. Local debugging only, `NODE_ENV` no longer turns checks off |
+| `<PROVIDER>_SKIP_SIGNATURE_CHECK`                             | `false`                                                         | `WATA`, `TEBEX`, `CRYPTOBOT`, `ROBOKASSA`, `ROLLYPAY`: accept webhooks without a valid signature. Local debugging only, `NODE_ENV` no longer turns checks off |
 | `PAYMENT_RETURN_URL`                                          | `http://localhost:3002/payment/success`                         | Where gateways redirect the player                                                                                                                |
 | `WEBHOOK_BASE_URL`                                            | `http://localhost:3001`                                         | Public backend URL used in gateway webhooks                                                                                                       |
 | `SKIP_DB`                                                     | `false`                                                         | Skip external deps (used by tests)                                                                                                                |
@@ -95,7 +95,7 @@ All configuration is read from environment variables (see `src/config/index.ts`)
 src/
   config/      env + sequelize bootstrap
   core/        base repository / service / controller, shared errors
-  gateways/    YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot HTTP clients
+  gateways/    YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot, RollyPay HTTP clients
   models/      Sequelize models
   plugins/     Fastify plugins (jwt, cors, rate-limit, error-handler)
   routes/      auth, products, payments, customers, stats, webhooks, plugin

@@ -7,11 +7,19 @@ import { ValidationError } from '@/core';
 import type { ProcessedImage } from '@/types';
 
 const ACCEPTED_MIME = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif']);
-const MAX_DIMENSION = 1024;
 const WEBP_QUALITY = 82;
 
+const IMAGE_TARGETS = {
+  product: { subdir: 'products', maxDimension: 1024 },
+  shop: { subdir: 'shop/images', maxDimension: 2048 },
+} as const;
+
+export type ImageTarget = keyof typeof IMAGE_TARGETS;
+
 export class ImageService {
-  async processProductImage(buffer: Buffer, mimeType: string): Promise<ProcessedImage> {
+  async processImage(buffer: Buffer, mimeType: string, target: ImageTarget): Promise<ProcessedImage> {
+    const { subdir, maxDimension } = IMAGE_TARGETS[target];
+
     if (!buffer || buffer.length === 0) {
       throw new ValidationError('Empty file');
     }
@@ -28,8 +36,8 @@ export class ImageService {
     let pipeline = sharp(buffer, { failOn: 'error' })
       .rotate()
       .resize({
-        width: MAX_DIMENSION,
-        height: MAX_DIMENSION,
+        width: maxDimension,
+        height: maxDimension,
         fit: 'inside',
         withoutEnlargement: true,
       });
@@ -39,8 +47,8 @@ export class ImageService {
     if (normalizedMime === 'image/gif') {
       pipeline = sharp(buffer, { failOn: 'error', animated: true })
         .resize({
-          width: MAX_DIMENSION,
-          height: MAX_DIMENSION,
+          width: maxDimension,
+          height: maxDimension,
           fit: 'inside',
           withoutEnlargement: true,
         });
@@ -51,7 +59,6 @@ export class ImageService {
       .toBuffer({ resolveWithObject: true });
 
     const filename = `${randomUUID()}.webp`;
-    const subdir = 'products';
     const relativePath = `${subdir}/${filename}`;
 
     const targetDir = resolve(process.cwd(), config.uploads.dir, subdir);

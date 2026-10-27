@@ -83,6 +83,16 @@ const DEFAULT_PROVIDERS: ProviderDefinition[] = [
     commissionPercent: 5,
     supportedCurrencies: ['USD'],
   },
+  {
+    providerId: 'rollypay',
+    name: 'RollyPay',
+    description: 'СБП, карты РФ и зарубежные, SberPay, T-Pay',
+    icon: 'i-lucide-zap',
+    credentials: { apiKey: '', signingSecret: '' },
+    providerConfig: {},
+    commissionPercent: 4,
+    supportedCurrencies: ['RUB'],
+  },
 ];
 
 const PUBLIC_CREDENTIALS = new Set(['shopId', 'merchantId', 'merchantLogin']);

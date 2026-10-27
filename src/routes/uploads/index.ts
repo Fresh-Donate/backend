@@ -1,9 +1,11 @@
 import { type FastifyPluginAsync, type FastifyRequest } from 'fastify';
-import { ImageService } from '@/services/image.service';
+import { ImageService, type ImageTarget } from '@/services/image.service';
+import { FileService } from '@/services/file.service';
 import { ValidationError } from '@/core';
 import { config } from '@/config';
 
 const imageService = new ImageService();
+const fileService = new FileService();
 
 // Prefer BACKEND_PUBLIC_URL so URLs persisted in the DB stay stable across
 // reverse-proxy hops; fall back to the request's scheme + host for local dev.
@@ -11,13 +13,12 @@ function buildPublicUrl(request: FastifyRequest, relativePath: string): string {
   const base =
     config.uploads.publicBaseUrl
     || `${request.protocol}://${request.headers.host ?? `${config.server.host}:${config.server.port}`}`;
-  return `${base.replace(/\/+$/, '')}/uploads/${relativePath}`;
+  const encoded = relativePath.split('/').map(encodeURIComponent).join('/');
+  return `${base.replace(/\/+$/, '')}/uploads/${encoded}`;
 }
 
 const uploadsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
-  fastify.post('/product-image', {
-    onRequest: [fastify.authenticate],
-  }, async (request, reply) => {
+  async function uploadImage(request: FastifyRequest, target: ImageTarget) {
     const file = await request.file();
     if (!file) {
       throw new ValidationError('No file uploaded');
@@ -32,13 +33,43 @@ const uploadsRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       );
     }
 
-    const result = await imageService.processProductImage(buffer, file.mimetype);
+    const result = await imageService.processImage(buffer, file.mimetype, target);
 
-    return reply.code(201).send({
+    return {
       url: buildPublicUrl(request, result.relativePath),
       bytes: result.bytes,
       width: result.width,
       height: result.height,
+    };
+  }
+
+  fastify.post('/product-image', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    return reply.code(201).send(await uploadImage(request, 'product'));
+  });
+
+  fastify.post('/shop-image', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    return reply.code(201).send(await uploadImage(request, 'shop'));
+  });
+
+  fastify.post('/shop-file', {
+    onRequest: [fastify.authenticate],
+  }, async (request, reply) => {
+    const file = await request.file({ throwFileSizeLimit: false });
+    if (!file) {
+      throw new ValidationError('No file uploaded');
+    }
+
+    const result = await fileService.saveShopFile(file.file, file.filename, file.mimetype);
+
+    return reply.code(201).send({
+      url: buildPublicUrl(request, result.relativePath),
+      name: result.name,
+      bytes: result.bytes,
+      mimeType: result.mimeType,
     });
   });
 };
