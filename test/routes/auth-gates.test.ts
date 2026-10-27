@@ -16,6 +16,9 @@ const PROTECTED: Case[] = [
 
   { method: 'PUT', url: '/settings' },
   { method: 'PUT', url: '/shop-settings' },
+  { method: 'POST', url: '/uploads/product-image' },
+  { method: 'POST', url: '/uploads/shop-image' },
+  { method: 'POST', url: '/uploads/shop-file' },
 
   { method: 'PUT', url: '/payment-providers/yookassa' },
   { method: 'POST', url: '/payment-options', payload: { label: 'x' } },
@@ -37,6 +40,7 @@ const PROTECTED: Case[] = [
   { method: 'GET', url: '/payment-providers/yookassa' },
   { method: 'GET', url: '/payment-options/all' },
   { method: 'GET', url: '/settings' },
+  { method: 'GET', url: '/shop-settings/schema' },
   { method: 'GET', url: '/stats' },
   { method: 'GET', url: '/stats/chart?from=2026-01-01&to=2026-01-31' },
 ];

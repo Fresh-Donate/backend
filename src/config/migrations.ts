@@ -235,12 +235,46 @@ async function deliveryQueue(db: Sequelize): Promise<void> {
   `);
 }
 
+async function shopFields(db: Sequelize): Promise<void> {
+  await db.query(`
+    ALTER TABLE shop_settings
+      ADD COLUMN IF NOT EXISTS fields JSONB NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS fields_schema JSONB,
+      ADD COLUMN IF NOT EXISTS name VARCHAR(64) DEFAULT 'FreshDonate Shop',
+      ADD COLUMN IF NOT EXISTS description VARCHAR(500) DEFAULT '',
+      ADD COLUMN IF NOT EXISTS color VARCHAR(32) DEFAULT 'sky',
+      ADD COLUMN IF NOT EXISTS ip VARCHAR(64) DEFAULT 'play.example.com',
+      ADD COLUMN IF NOT EXISTS owner_name VARCHAR(256) DEFAULT '',
+      ADD COLUMN IF NOT EXISTS owner_type VARCHAR(32) DEFAULT '',
+      ADD COLUMN IF NOT EXISTS owner_inn VARCHAR(32) DEFAULT '',
+      ADD COLUMN IF NOT EXISTS contact_email VARCHAR(256) DEFAULT '',
+      ADD COLUMN IF NOT EXISTS cart_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+
+  await db.query(`
+    UPDATE shop_settings
+       SET fields = jsonb_build_object(
+         'name',         COALESCE(name, 'FreshDonate Shop'),
+         'description',  COALESCE(description, ''),
+         'color',        COALESCE(color, 'sky'),
+         'ip',           COALESCE(ip, ''),
+         'ownerName',    COALESCE(owner_name, ''),
+         'ownerType',    COALESCE(owner_type, ''),
+         'ownerInn',     COALESCE(owner_inn, ''),
+         'contactEmail', COALESCE(contact_email, ''),
+         'cartEnabled',  COALESCE(cart_enabled, FALSE)
+       )
+     WHERE fields = '{}'::jsonb;
+  `);
+}
+
 const migrations: Migration[] = [
   { name: '001-customers-snapshot', up: snapshotCustomers },
   { name: '002-multi-server', up: multiServerTables },
   { name: '003-cart', up: cartTables },
   { name: '004-payment-indexes', up: paymentIndexes },
   { name: '005-delivery-queue', up: deliveryQueue },
+  { name: '006-shop-fields', up: shopFields },
 ];
 
 export async function runMigrations(db: Sequelize): Promise<void> {
