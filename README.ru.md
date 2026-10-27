@@ -25,7 +25,7 @@ FreshDonate - самохостимая система приёма донато�
 Бекенд - единый источник правды по товарам, платежам и клиентам. Он:
 
 - отдаёт REST API, который используют магазин и админка;
-- создаёт платежи во внешних шлюзах (YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot) и обрабатывает их вебхуки;
+- создаёт платежи во внешних шлюзах (YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot, RollyPay) и обрабатывает их вебхуки;
 - хранит отложенные доставки и передаёт их плагину при заходе игрока;
 - умеет доставлять покупки через RCON, если плагин не установлен;
 - выдаёт JWT для админки и ограничивает публичные ручки через rate‑limit.
@@ -84,7 +84,7 @@ Redis больше не используется. На уже установле
 | `CORS_ORIGIN`                                                 | `http://localhost:3000,http://localhost:3002`                   | Список разрешённых origin через запятую                                                                                                                  |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_TIMEWINDOW`                    | `100` / `60000`                                                 | Глобальный rate‑limit                                                                                                                                    |
 | `TRUSTED_PROXIES`                                             | приватные сети                                                  | Прокси, чьему `X-Forwarded-For` доверяем при определении IP клиента. Значение по умолчанию подходит для прокси в docker-сети (Coolify/Traefik, nginx в compose). `GET /health` возвращает `ip`, который видит бекенд: там должен быть ваш адрес, а не адрес прокси. За Cloudflare добавьте его диапазоны сюда и в доверенные IP прокси |
-| `<PROVIDER>_SKIP_SIGNATURE_CHECK`                             | `false`                                                         | `WATA`, `TEBEX`, `CRYPTOBOT`, `ROBOKASSA`: принимать вебхуки без валидной подписи. Только для локальной отладки, `NODE_ENV` больше не отключает проверки |
+| `<PROVIDER>_SKIP_SIGNATURE_CHECK`                             | `false`                                                         | `WATA`, `TEBEX`, `CRYPTOBOT`, `ROBOKASSA`, `ROLLYPAY`: принимать вебхуки без валидной подписи. Только для локальной отладки, `NODE_ENV` больше не отключает проверки |
 | `PAYMENT_RETURN_URL`                                          | `http://localhost:3002/payment/success`                         | Куда редиректит шлюз игрока после оплаты                                                                                                                 |
 | `WEBHOOK_BASE_URL`                                            | `http://localhost:3001`                                         | Публичный URL бекенда для вебхуков шлюзов                                                                                                                |
 | `SKIP_DB`                                                     | `false`                                                         | Отключить внешние зависимости (используется тестами)                                                                                                     |
@@ -95,7 +95,7 @@ Redis больше не используется. На уже установле
 src/
   config/      env и инициализация sequelize
   core/        базовые repository/service/controller, общие ошибки
-  gateways/    HTTP‑клиенты для YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot
+  gateways/    HTTP‑клиенты для YooKassa, Heleket, Wata, Robokassa, Tebex, CryptoBot, RollyPay
   models/      модели Sequelize
   plugins/     плагины Fastify (jwt, cors, rate-limit, error-handler)
   routes/      auth, products, payments, customers, stats, webhooks, plugin

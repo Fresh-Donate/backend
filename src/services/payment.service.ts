@@ -30,6 +30,7 @@ import { WataGateway } from '@/gateways/wata.gateway';
 import { TebexGateway } from '@/gateways/tebex.gateway';
 import { CryptoBotGateway } from '@/gateways/cryptobot.gateway';
 import { RobokassaGateway } from '@/gateways/robokassa.gateway';
+import { RollyPayGateway } from '@/gateways/rollypay.gateway';
 import { config } from '@/config';
 import { buildAmountInTargetSql, convert, toBaseCurrency, isSupportedCurrency } from '@/utils/currency';
 import type {
@@ -53,6 +54,8 @@ import type {
   TebexWebhookEnvelope,
   CryptoBotWebhookUpdate,
   CryptoBotFiat,
+  RollyPayCurrency,
+  RollyPayWebhookPayload,
   StatsSummary,
   StatsFunnel,
   ActivityBucket,
@@ -1006,6 +1009,37 @@ export class PaymentService {
         externalPaymentId: checkout.ident,
         externalPaymentUrl: checkout.checkoutUrl,
       });
+    } else if (provider.providerId === 'rollypay') {
+      const { apiKey, signingSecret } = provider.credentials;
+      if (!apiKey || !signingSecret) {
+        throw new PaymentError(
+          'RollyPay credentials not configured. Set apiKey and signingSecret in payment provider settings.',
+          'ROLLYPAY_NOT_CONFIGURED',
+        );
+      }
+
+      const gateway = new RollyPayGateway(apiKey);
+      const returnUrl = config.payment.returnUrl;
+
+      const rollyPayment = await gateway.createPayment({
+        amount: Number(payment.totalAmount),
+        currency: payment.currency as RollyPayCurrency,
+        orderId: payment.id,
+        description: `${productName} - FreshDonate`,
+        successRedirectUrl: `${returnUrl}?paymentId=${payment.id}`,
+        failRedirectUrl: `${returnUrl}?paymentId=${payment.id}&failed=1`,
+        test: provider.testMode,
+      });
+
+      await payment.update({
+        providerId: provider.providerId,
+        externalPaymentId: rollyPayment.payment_id,
+        externalPaymentUrl: rollyPayment.pay_url,
+        meta: {
+          ...payment.meta,
+          rollypay: { testMode: provider.testMode },
+        },
+      });
     }
   }
 
@@ -1395,6 +1429,66 @@ export class PaymentService {
       await this.deliveryService.cancelPending(payment.id);
 
       console.log(`Tebex: payment ${payment.id} refunded (tx: ${subject.transaction_id})`);
+    }
+  }
+
+  async handleRollyPayWebhook(payload: RollyPayWebhookPayload): Promise<void> {
+    const { status } = payload;
+    if (!status) return;
+
+    let payment: Payment | null = null;
+    if (isUuid(payload.order_id)) {
+      payment = await Payment.findByPk(payload.order_id);
+    }
+    if (!payment && payload.payment_id) {
+      payment = await Payment.findOne({
+        where: { providerId: 'rollypay', externalPaymentId: payload.payment_id },
+      });
+    }
+    if (!payment) {
+      console.warn(
+        `RollyPay webhook: payment not found (order_id=${payload.order_id} payment_id=${payload.payment_id})`,
+      );
+      return;
+    }
+
+    if (payload.test && !payment.meta.rollypay?.testMode) {
+      console.warn(`RollyPay webhook: test event ignored for live payment ${payment.id}`);
+      return;
+    }
+
+    const rollypayMeta = {
+      ...(payment.meta.rollypay || {}),
+      paymentId: payload.payment_id,
+      status,
+    };
+
+    if (status === 'paid') {
+      const changed = await this.markPaid(payment, { paidAt: new Date() }, { rollypay: rollypayMeta });
+      if (!changed) return;
+
+      console.log(`RollyPay: payment ${payment.id} succeeded (${payload.payment_id})`);
+    } else if ((status === 'canceled' || status === 'expired') && payment.status === 'pending') {
+      const changed = await this.transition(
+        payment.id,
+        { status: 'pending' },
+        { status: status === 'expired' ? 'expired' : 'failed' },
+        { cancelReason: status, rollypay: rollypayMeta },
+      );
+      if (!changed) return;
+
+      console.log(`RollyPay: payment ${payment.id} ${status} (${payload.payment_id})`);
+    } else if ((status === 'refunded' || status === 'chargeback') && (payment.status === 'paid' || payment.status === 'delivered')) {
+      const changed = await this.transition(
+        payment.id,
+        { status: { [Op.in]: ['paid', 'delivered'] } },
+        { status: 'refunded' },
+        { rollypay: { ...rollypayMeta, refundedAt: new Date().toISOString() } },
+      );
+      if (!changed) return;
+      await this.deliveryService.cancelPending(payment.id);
+
+      console.log(`RollyPay: payment ${payment.id} ${status} (${payload.payment_id})`);
     }
   }
 

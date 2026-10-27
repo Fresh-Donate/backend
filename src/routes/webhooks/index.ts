@@ -5,9 +5,15 @@ import { WataGateway } from '@/gateways/wata.gateway';
 import { TebexGateway } from '@/gateways/tebex.gateway';
 import { CryptoBotGateway } from '@/gateways/cryptobot.gateway';
 import { RobokassaGateway } from '@/gateways/robokassa.gateway';
+import { RollyPayGateway } from '@/gateways/rollypay.gateway';
 import { PaymentProvider } from '@/models/payment-provider.model';
 import { PaymentError } from '@/core/errors';
-import type { CryptoBotWebhookUpdate, RobokassaHashAlgorithm, RobokassaWebhookPayload } from '@/types';
+import type {
+  CryptoBotWebhookUpdate,
+  RobokassaHashAlgorithm,
+  RobokassaWebhookPayload,
+  RollyPayWebhookPayload,
+} from '@/types';
 
 const RETRY_LATER = 'Webhook processing failed, retry later';
 
@@ -283,6 +289,52 @@ const webhookRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     }
 
     return reply.code(200).send({ id: payload.id });
+  });
+
+  fastify.post<{ Body: RollyPayWebhookPayload }>('/rollypay', {
+    config: { rateLimit: { max: 200, timeWindow: 60000 } },
+  }, async (request, reply) => {
+    const provider = await PaymentProvider.findOne({ where: { providerId: 'rollypay' } });
+    if (!provider) {
+      request.log.error('RollyPay webhook: provider not found in database');
+      return reply.code(200).send({ status: 'ok' });
+    }
+
+    const { signingSecret } = provider.credentials;
+    const rawBody: Buffer | undefined = (request as any).rawBody;
+    const signature = request.headers['x-signature'] as string | undefined;
+    const timestamp = request.headers['x-timestamp'] as string | undefined;
+
+    const skipSig = process.env.ROLLYPAY_SKIP_SIGNATURE_CHECK === 'true';
+
+    if (!skipSig) {
+      if (!signingSecret) {
+        request.log.warn('RollyPay webhook rejected: signingSecret not configured');
+        return reply.code(403).send({ error: 'Not configured' });
+      }
+      if (!rawBody) {
+        request.log.warn('RollyPay webhook rejected: raw body unavailable');
+        return reply.code(400).send({ error: 'Bad request' });
+      }
+      if (!RollyPayGateway.verifyWebhookSignature(rawBody, timestamp, signature, signingSecret)) {
+        request.log.warn('RollyPay webhook rejected: invalid signature');
+        return reply.code(403).send({ error: 'Invalid signature' });
+      }
+    }
+
+    const payload = request.body || {};
+    request.log.info(
+      `RollyPay webhook: event=${payload.event_type} status=${payload.status} payment=${payload.payment_id} order=${payload.order_id}`,
+    );
+
+    try {
+      await paymentService.handleRollyPayWebhook(payload);
+    } catch (error: any) {
+      request.log.error(`RollyPay webhook processing error: ${error.message}`);
+      return reply.code(500).send({ error: RETRY_LATER });
+    }
+
+    return reply.code(200).send({ status: 'ok' });
   });
 
   // Robokassa ResultURL: form-urlencoded body, signed with password2. Must
